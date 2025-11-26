@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Manage Seasonings</title>
+    <style>
+        :root {
+            --secondary-color: #50e3c2;
+            --background-color: #f4f7f6;
+            --card-background: #ffffff;
+            --text-color: #333;
+            --border-color: #ddd;
+            --shadow-color: rgba(0, 0, 0, 0.1);
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: var(--background-color);
+            color: var(--text-color);
+        }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { color: var(--secondary-color); }
+        .card {
+            background-color: var(--card-background);
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 6px var(--shadow-color);
+        }
+        .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
+        .form-grid .full-width { grid-column: 1 / -1; }
+        label { display: block; margin-bottom: 5px; font-weight: 500; }
+        input, select, button {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            box-sizing: border-box;
+            font-size: 1em;
+        }
+        button { background-color: var(--secondary-color); color: white; border: none; cursor: pointer; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        th, td { padding: 12px; text-align: left; border-bottom: 1px solid var(--border-color); }
+        th { background-color: #f8f8f8; }
+        a { color: var(--secondary-color); text-decoration: none; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <a href="/">&laquo; Back to Menu</a>
+        <h1>Manage Seasonings</h1>
+
+        <div class="card">
+            <h2>Add Seasoning to Stock</h2>
+            <form id="addSeasoningForm" class="form-grid">
+                <div class="full-width">
+                    <label for="catalog-select">Seasoning</label>
+                    <select id="catalog-select" required></select>
+                </div>
+                <div>
+                    <label for="status-select">Status</label>
+                    <select id="status-select">
+                        <option value="あり">あり (In Stock)</option>
+                        <option value="残りわずか">残りわずか (Low Stock)</option>
+                        <option value="なし">なし (Out of Stock)</option>
+                    </select>
+                </div>
+                <button type="submit" class="full-width">Add to Stock</button>
+            </form>
+        </div>
+
+        <div class="card">
+            <h2>Seasonings in Stock</h2>
+            <table id="inventoryTable">
+                <thead><tr><th>Name</th><th>Category</th><th>Status</th></tr></thead>
+                <tbody id="inventoryList"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', async () => {
+            const catalogSelect = document.getElementById('catalog-select');
+            const statusSelect = document.getElementById('status-select');
+            const inventoryList = document.getElementById('inventoryList');
+            const form = document.getElementById('addSeasoningForm');
+
+            // 1. Fetch catalog and populate dropdown
+            try {
+                const response = await fetch('/api/catalog');
+                const catalog = await response.json();
+                const seasoningsCatalog = catalog.filter(item => item.classification === '調味料');
+                
+                catalogSelect.innerHTML = '<option value="">Select a seasoning...</option>';
+                seasoningsCatalog.forEach(item => {
+                    const option = document.createElement('option');
+                    option.value = item.id;
+                    option.textContent = item.name;
+                    catalogSelect.appendChild(option);
+                });
+            } catch (error) {
+                console.error('Failed to load catalog:', error);
+                catalogSelect.innerHTML = '<option value="">Could not load catalog</option>';
+            }
+            
+            // 2. Fetch and render inventory
+            const fetchInventory = async () => {
+                try {
+                    const response = await fetch('/api/seasonings');
+                    const inventory = await response.json();
+                    inventoryList.innerHTML = '';
+                    if (!inventory) return;
+                    inventory.forEach(item => {
+                        const tr = document.createElement('tr');
+                        tr.innerHTML = `
+                            <td>${item.name || ''}</td>
+                            <td>${item.category || ''}</td>
+                            <td>${item.status || ''}</td>
+                        `;
+                        inventoryList.appendChild(tr);
+                    });
+                } catch (error) {
+                    console.error('Failed to load inventory:', error);
+                }
+            };
+
+            // 3. Handle form submission
+            form.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const body = {
+                    catalog_id: parseInt(catalogSelect.value, 10),
+                    status: statusSelect.value,
+                };
+
+                if (!body.catalog_id) {
+                    alert('Please select a seasoning.');
+                    return;
+                }
+
+                try {
+                    const response = await fetch('/api/seasonings', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(body),
+                    });
+                    if (!response.ok) throw new Error(await response.text());
+                    
+                    form.reset();
+                    catalogSelect.value = "";
+                    await fetchInventory();
+
+                } catch (error) {
+                    console.error('Failed to add seasoning:', error);
+                    alert('Error adding seasoning.');
+                }
+            });
+            
+            // Initial load
+            await fetchInventory();
+        });
+    </script>
+</body>
+</html>

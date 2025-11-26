@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Kimichan Kitchen</title>
+    
+    <link rel="stylesheet" href="css/base.css">
+    <link rel="stylesheet" href="css/layout.css">
+    <link rel="stylesheet" href="css/components.css">
+    <link rel="stylesheet" href="css/views.css">
+</head>
+<body>
+
+    <header>
+        <div class="logo">きみちゃんキッチン</div>
+    </header>
+
+    <main id="app-container" class="container">
+    </main>
+
+    <nav class="bottom-nav">
+        <a href="#" class="nav-item" data-view="inventory">
+      
+       <span class="nav-icon">🥦</span>
+            <span>食材</span>
+        </a>
+        <a href="#" class="nav-item" data-view="seasoning">
+            <span class="nav-icon">🧂</span>
+            <span>調味料</span>
+        </a>
+        <a href="#" class="nav-item" data-view="recipes">
+            <span class="nav-icon">🍳</span>
+     
+        <span>レシピ</span>
+        </a>
+        <a href="#" class="nav-item" data-view="catalog">
+            <span class="nav-icon">📖</span>
+            <span>図鑑</span>
+        </a>
+    </nav>
+
+    <script src="js/catalog_list.js"></script>
+    <script src="js/catalog_edit.js"></script>
+    
+    <script src="js/inventory_locations.js"></script>
+    <script src="js/inventory_photos.js"></script>
+    <script src="js/inventory.js"></script>
+    <script src="js/seasoning_fetch.js"></script>
+    <script src="js/seasoning_ui.js"></script>
+    <script src="js/recipe_list.js"></script>
+    <script src="js/recipe_edit.js"></script>
+  
+   <script src="js/app.js"></script>
+</body>
+</html>

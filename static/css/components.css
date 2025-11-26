@@ -1,0 +1,265 @@
+/* カード */
+.card-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.card {
+    background: var(--card-bg);
+    border-radius: var(--border-radius);
+    padding: 16px;
+    box-shadow: var(--shadow-soft);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.card-content {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+/* タグ・バッジ */
+.tag {
+    font-size: 10px;
+    background-color: var(--primary-light);
+    color: var(--primary-color);
+    padding: 3px 8px;
+    border-radius: 4px;
+    align-self: flex-start;
+}
+
+.location-badge {
+    font-size: 10px;
+    background-color: #e0f2f1;
+    color: #009688;
+    padding: 3px 8px;
+    border-radius: 4px;
+    margin-left: 5px;
+}
+
+.loc-header-badge {
+    display: inline-block;
+    background: #eee;
+    color: #666;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: bold;
+    margin-bottom: 5px;
+}
+
+.item-name {
+    font-size: 16px;
+    font-weight: bold;
+}
+
+.item-unit {
+    font-size: 12px;
+    color: var(--text-sub);
+}
+
+/* フォーム */
+.form-group {
+    margin-bottom: 16px;
+}
+
+.label {
+    display: block;
+    font-size: 12px;
+    margin-bottom: 6px;
+    color: var(--text-sub);
+}
+
+.input-field {
+    width: 100%;
+    padding: 12px;
+    border: 1px solid #eee;
+    border-radius: 12px;
+    font-size: 16px;
+    outline: none;
+    background-color: #fff;
+}
+
+.input-field:focus {
+    border-color: var(--primary-color);
+}
+
+.textarea-field {
+    width: 100%;
+    padding: 12px;
+    border: 1px solid #eee;
+    border-radius: 12px;
+    font-size: 14px;
+    min-height: 100px;
+    font-family: monospace;
+    resize: none;
+}
+
+.search-area {
+    margin-bottom: 20px;
+}
+
+.search-input {
+    width: 100%;
+    padding: 12px 20px;
+    border: none;
+    border-radius: 30px;
+    background-color: var(--card-bg);
+    box-shadow: var(--shadow-soft);
+    font-size: 14px;
+    outline: none;
+    transition: 0.3s;
+}
+
+.search-input:focus {
+    box-shadow: 0 4px 15px rgba(255, 159, 67, 0.2);
+}
+
+/* ボタン */
+.btn-row {
+    display: flex;
+    gap: 12px;
+    margin-top: 10px;
+    flex-shrink: 0;
+}
+
+.btn {
+    flex: 1;
+    padding: 14px;
+    border: none;
+    border-radius: 12px;
+    font-weight: bold;
+    font-size: 14px;
+    cursor: pointer;
+    text-decoration: none;
+    text-align: center;
+    display: inline-block;
+}
+
+.btn-cancel {
+    background: var(--bg-color);
+    color: var(--text-sub);
+}
+
+.btn-save {
+    background: var(--primary-color);
+    color: white;
+}
+
+.btn-delete {
+    background: #ffebee;
+    color: #e74c3c;
+}
+
+.fab {
+    position: fixed;
+    bottom: 90px;
+    right: 20px;
+    width: 56px;
+    height: 56px;
+    background-color: var(--primary-color);
+    color: white;
+    border-radius: 50%;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    font-size: 28px;
+    box-shadow: 0 4px 15px rgba(255, 159, 67, 0.4);
+    border: none;
+    cursor: pointer;
+    z-index: 90;
+}
+
+/* タブ */
+.tab-group {
+    display: flex;
+    background: var(--bg-color);
+    padding: 4px;
+    border-radius: 12px;
+    margin-bottom: 20px;
+}
+
+.tab-btn {
+    flex: 1;
+    padding: 8px;
+    border: none;
+    background: none;
+    border-radius: 10px;
+    font-size: 13px;
+    color: var(--text-sub);
+    cursor: pointer;
+}
+
+.tab-btn.active {
+    background: white;
+    color: var(--primary-color);
+    box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+    font-weight: bold;
+}
+
+/* ステッパー */
+.stepper-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    background: #f9f9f9;
+    padding: 15px;
+    border-radius: 12px;
+}
+.stepper-display {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 10px;
+    width: 100%;
+    justify-content: center;
+}
+.stepper-btn {
+    width: 50px;
+    height: 50px;
+    border-radius: 50%;
+    border: none;
+    background: white;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+    font-size: 24px;
+    color: var(--primary-color);
+    cursor: pointer;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+.stepper-btn:active {
+    background: #eee;
+    transform: scale(0.95);
+}
+.stepper-value {
+    font-size: 24px;
+    font-weight: bold;
+    width: 100px;
+    text-align: center;
+    border: none;
+    background: transparent;
+    outline: none;
+}
+.preset-chips {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    justify-content: center;
+}
+.preset-chip {
+    padding: 6px 12px;
+    border-radius: 20px;
+    background: white;
+    border: 1px solid #eee;
+    font-size: 12px;
+    color: var(--text-sub);
+    cursor: pointer;
+}
+.preset-chip:active {
+    background: var(--primary-light);
+    color: var(--primary-color);
+}

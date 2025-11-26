@@ -1,0 +1,98 @@
+<div class="search-area">
+    <input type="text" id="recipe-search" class="search-input" placeholder="レシピを検索...">
+</div>
+
+<div id="recipe-list" class="card-list">
+</div>
+
+<button id="fab-add-recipe" class="fab">＋</button>
+
+<div id="modal-recipe" class="modal-overlay">
+    <div class="modal-sheet full-screen">
+        <div class="modal-header" id="modal-recipe-title">レシピ登録</div>
+        
+        <div class="modal-scroll-area">
+            <input type="hidden" id="rec-id">
+            
+            <div class="form-group">
+                <label class="label">レシピ名</label>
+                <input type="text" id="rec-name" class="input-field" placeholder="例: 至高の豚汁">
+            </div>
+
+            <div class="form-group">
+                <label class="label">分量・何人前</label>
+                <input type="text" id="rec-yield" class="input-field" placeholder="例: 2人分">
+            </div>
+
+            <div class="form-group">
+                <label class="label">参照URL (YouTubeなど)</label>
+                <input type="text" id="rec-url" class="input-field" placeholder="https://...">
+            </div>
+
+            <div class="form-group">
+                <label class="label">作り方・メモ</label>
+                <textarea id="rec-process" class="textarea-field" placeholder="手順をここに..." style="min-height:200px;"></textarea>
+            </div>
+
+            <div class="form-group">
+                <label class="label">材料リスト</label>
+                <p style="font-size:11px; color:#999; margin-bottom:5px;">
+                    例:「豚バラ,200,g」または「＝ソース＝」で見出しが作れます。<br>
+                    外部サイトのレシピもそのまま貼り付けてみてください。
+                </p>
+                <textarea id="rec-csv" class="textarea-field" style="min-height:150px;" placeholder="豚バラ肉,280,g&#13;&#10;大根,0.5,本"></textarea>
+            </div>
+        </div>
+
+        <div class="btn-row">
+            <button id="btn-rec-cancel" class="btn btn-cancel">閉じる</button>
+            <button id="btn-rec-save" class="btn btn-save">保存する</button>
+        </div>
+    </div>
+</div>
+
+<div id="modal-recipe-detail" class="modal-overlay">
+    <div class="modal-sheet full-screen">
+        <div class="modal-header" id="detail-title" style="font-size:18px; color:#e67e22;">レシピ詳細</div>
+        
+        <div class="modal-scroll-area">
+            <div id="detail-yield" style="text-align:center; font-size:12px; color:#666; margin-bottom:10px;"></div>
+            
+            <div id="detail-missing-alert" class="missing-alert-box" style="display:none;"></div>
+
+            <div style="margin-bottom:20px; text-align:center;">
+                <a id="detail-link" href="#" target="_blank" class="btn" style="background:#e74c3c; color:white; text-decoration:none; display:inline-block; padding:10px 20px; border-radius:30px; font-size:14px;">
+                    ▶ YouTubeで見る
+                </a>
+            </div>
+
+            <div class="form-group">
+                <label class="label">材料</label>
+                <div id="detail-ingredients" style="background:#f9f9f9; padding:10px; border-radius:8px; font-size:14px; line-height:1.6;">
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label class="label">作り方</label>
+                <div id="detail-process" style="white-space:pre-wrap; background:#f9f9f9; padding:10px; border-radius:8px; font-size:14px;">
+                </div>
+            </div>
+        </div>
+
+        <div class="btn-row">
+            <button id="btn-detail-close" class="btn btn-cancel">閉じる</button>
+            <button id="btn-detail-edit" class="btn btn-save" style="background-color:#f39c12;">修正する</button>
+        </div>
+    </div>
+</div>
+
+<div id="modal-missing-ing" class="modal-overlay" style="z-index: 300;">
+    <div class="modal-sheet">
+        <div class="modal-header" style="color:#e74c3c;">未登録の食材があります</div>
+        <div class="modal-scroll-area" id="missing-list-area" style="max-height:300px;"></div>
+        <div class="btn-row">
+            <button id="btn-missing-cancel" class="btn btn-cancel">やめる</button>
+            <button id="btn-missing-register" class="btn btn-save">登録して保存</button>
+        </div>
+    </div>
+</div>

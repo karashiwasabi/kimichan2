@@ -1,0 +1,100 @@
+<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+    <div style="display:flex; gap:10px; align-items:center;">
+        <select id="sort-order" class="input-field" style="width:auto; padding:6px 12px; font-size:12px;">
+            <option value="id_desc">新着順 (ID降順)</option>
+            <option value="kana_asc">50音順</option>
+        </select>
+        <label style="font-size:12px; display:flex; align-items:center; cursor:pointer;">
+            <input type="checkbox" id="filter-no-kana" style="margin-right:4px;"> よみがな未登録
+        </label>
+    </div>
+    <a href="/api/catalog/export" class="btn" style="padding:6px 12px; font-size:11px; background:#eee; color:#666; text-decoration:none; border-radius:4px;">
+        📥 CSV
+    </a>
+</div>
+
+<div class="category-wrapper">
+    <button id="scroll-left" class="scroll-btn">◀</button>
+    <div id="category-filters" class="category-scroll">
+    </div>
+    <button id="scroll-right" class="scroll-btn">▶</button>
+</div>
+
+<div class="search-area">
+    <input type="text" id="catalog-search" class="search-input" placeholder="食材名で検索...">
+</div>
+
+<div id="catalog-list" class="card-list">
+</div>
+
+<button id="fab-add" class="fab">＋</button>
+
+<div id="modal-overlay" class="modal-overlay">
+    <div class="modal-sheet">
+        <div class="modal-header" id="modal-title">アイテム登録</div>
+        
+        <div class="modal-scroll-area">
+            <input type="hidden" id="edit-id">
+            <input type="hidden" id="original-unit">
+            <input type="hidden" id="original-name"> <div class="tab-group" style="margin-bottom:15px;">
+                <button type="button" id="tab-single" class="tab-btn active">個別入力</button>
+                <button type="button" id="tab-csv" class="tab-btn">一括登録</button>
+            </div>
+
+            <div id="form-single">
+                
+                <div class="form-group">
+                    <label class="label">食材名 (入力すると下に類似候補が出ます)</label>
+                    <input type="text" id="input-name" class="input-field" placeholder="例: キャベツ">
+                </div>
+
+                <div id="reference-area" style="display:none; background:#f0f8ff; padding:10px; border-radius:8px; margin-bottom:15px; border:1px solid #dbeafe;">
+                    <div style="font-size:11px; font-weight:bold; color:#4a90e2; margin-bottom:5px;">
+                        💡 類似・参考アイテム (クリックで分類・カテゴリをコピー)
+                    </div>
+                    <div id="reference-list" style="display:flex; flex-wrap:wrap; gap:5px;"></div>
+                </div>
+
+                <div class="form-group">
+                    <label class="label">分類</label>
+                    <select id="input-classification" class="input-field">
+                        <option value="食材">食材</option>
+                        <option value="調味料">調味料</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label class="label">カテゴリ</label>
+                    <div style="display:flex; gap:10px;">
+                         <select id="select-category" class="input-field" style="flex:1;">
+                            <option value="">(新規入力)</option>
+                         </select>
+                         <input type="text" id="input-category" class="input-field" style="flex:1;" placeholder="新規カテゴリ名">
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label class="label">よみがな (任意)</label>
+                    <input type="text" id="input-kana" class="input-field" placeholder="例: きゃべつ">
+                </div>
+                <div class="form-group">
+                    <label class="label">単位</label>
+                    <input type="text" id="input-unit" class="input-field" placeholder="例: 個, g">
+                    <p style="font-size:10px; color:#e74c3c; margin-top:4px;">※単位を変えると在庫数の意味が変わる場合があります。</p>
+                </div>
+            </div>
+
+            <div id="form-csv" style="display:none;">
+                <div class="form-group">
+                    <label class="label">CSV貼り付け (品名,分類,カテゴリ,単位,よみがな)</label>
+                    <p style="font-size:11px; color:#999; margin-bottom:5px;">例: キャベツ,食材,野菜,個,きゃべつ</p>
+                    <textarea id="input-csv-text" class="textarea-field" placeholder="キャベツ,食材,野菜,個,きゃべつ&#13;&#10;豚バラ,食材,肉類,g,ぶたばら&#13;&#10;醤油,調味料,,g,しょうゆ"></textarea>
+                </div>
+                <div id="csv-result-area" class="result" style="display:none; margin-top: 10px; padding: 10px; background-color: #e8f5e9; border: 1px solid #c8e6c9; border-radius: 8px;"></div>
+            </div>
+        </div>
+        <div class="btn-row">
+            <button id="btn-cancel" class="btn btn-cancel">キャンセル</button>
+            <button id="btn-save" class="btn btn-save">保存</button>
+        </div>
+    </div>
+</div>

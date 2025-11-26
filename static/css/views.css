@@ -1,0 +1,151 @@
+/* 冷蔵庫スナップショットエリア */
+.fridge-snapshot-area {
+    display: flex;
+    overflow-x: auto;
+    gap: 10px;
+    padding-bottom: 5px;
+    margin-bottom: 15px;
+    margin-top: 5px;
+    border-bottom: 1px dashed #eee;
+    min-height: 110px;
+}
+.fridge-snapshot-area::-webkit-scrollbar {
+    display: none;
+}
+
+.snapshot-card {
+    flex: 0 0 133px; /* 4:3比率基準: 高さ100pxなら幅133px */
+    height: 100px;
+    position: relative;
+    border-radius: 12px;
+    overflow: hidden;
+    background: #f0f0f0;
+    border: 1px solid #ddd;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.snapshot-img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    cursor: pointer;
+    display: block;
+}
+
+.btn-add-snapshot {
+    flex: 0 0 80px;
+    height: 100px;
+    background: #fff;
+    border: 2px dashed #ccc;
+    border-radius: 12px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    cursor: pointer;
+    color: #999;
+    font-size: 10px;
+    font-weight: bold;
+}
+
+.btn-delete-snapshot {
+    position: absolute;
+    top: 5px;
+    right: 5px;
+    background: rgba(0,0,0,0.5);
+    color: white;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    border: none;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    font-size: 14px;
+    cursor: pointer;
+    z-index: 10;
+}
+
+/* モーダルでの写真拡大 */
+.modal-image-view {
+    width: 100%;
+    height: auto;
+    max-height: 80vh;
+    object-fit: contain;
+}
+
+/* カタログ画面用 */
+.category-wrapper {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    margin-bottom: 10px;
+}
+.scroll-btn {
+    background: var(--card-bg);
+    border: 1px solid #eee;
+    border-radius: 50%;
+    width: 30px;
+    height: 30px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    color: var(--text-sub);
+    flex-shrink: 0;
+    font-size: 12px;
+}
+.category-scroll {
+    display: flex;
+    overflow-x: auto;
+    gap: 8px;
+    padding-bottom: 5px;
+    scrollbar-width: none;
+    flex: 1;
+    scroll-behavior: smooth;
+}
+.category-scroll::-webkit-scrollbar {
+    display: none;
+}
+.cat-chip {
+    background: var(--card-bg);
+    border: 1px solid #eee;
+    padding: 6px 12px;
+    border-radius: 20px;
+    font-size: 12px;
+    white-space: nowrap;
+    color: var(--text-sub);
+    cursor: pointer;
+    transition: 0.2s;
+}
+.cat-chip.active {
+    background: var(--primary-color);
+    color: white;
+    border-color: var(--primary-color);
+    font-weight: bold;
+}
+
+/* レシピ画面用 */
+.recipe-group-header {
+    background: #fff3e0;
+    color: #e67e22;
+    padding: 5px 10px;
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: bold;
+    margin-top: 10px;
+    margin-bottom: 5px;
+}
+.ing-status-ok {
+    color: #27ae60;
+    font-weight: bold;
+}
+.ing-status-missing {
+    color: #e74c3c;
+    font-weight: bold;
+    background: #fee;
+    padding: 2px 6px;
+    border-radius: 4px;
+}

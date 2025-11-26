@@ -1,0 +1,1559 @@
+----- C:\Users\wasab\OneDrive\デスクトップ\kimichan2\database.go -----
+package main
+
+import (
+	"database/sql"
+	"fmt"
+
+	_ "github.com/mattn/go-sqlite3"
+)
+
+var db *sql.DB
+
+func initDatabase() error {
+	const createCatalogSQL = `
+	CREATE TABLE IF NOT EXISTS item_catalog (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		name TEXT NOT NULL UNIQUE,
+		kana TEXT,
+		classification TEXT NOT NULL,
+		category TEXT,
+		default_unit TEXT
+	);`
+	if _, err := db.Exec(createCatalogSQL); err != nil {
+		return fmt.Errorf("item_catalog error: %w", err)
+	}
+
+	db.Exec("ALTER TABLE item_catalog ADD COLUMN kana TEXT;")
+
+	const createIngredientsSQL = `
+	CREATE TABLE IF NOT EXISTS refrigerator_ingredients (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		catalog_id INTEGER NOT NULL,
+		amount REAL,
+		unit TEXT,
+		expiration_date TEXT,
+		location TEXT,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		FOREIGN KEY (catalog_id) REFERENCES item_catalog (id)
+	);`
+	if _, err := db.Exec(createIngredientsSQL); err != nil {
+		return fmt.Errorf("refrigerator_ingredients error: %w", err)
+	}
+	db.Exec("ALTER TABLE refrigerator_ingredients ADD COLUMN location TEXT;")
+
+	db.Exec("PRAGMA foreign_keys = OFF;")
+	db.Exec("CREATE TEMPORARY TABLE temp_table(id, catalog_id, amount, unit, expiration_date, location, created_at, updated_at);")
+	db.Exec("INSERT INTO temp_table SELECT id, catalog_id, amount, unit, expiration_date, location, created_at, updated_at FROM refrigerator_ingredients;")
+	db.Exec("DROP TABLE refrigerator_ingredients;")
+	db.Exec(createIngredientsSQL)
+	db.Exec("INSERT INTO refrigerator_ingredients SELECT * FROM temp_table;")
+	db.Exec("DROP TABLE temp_table;")
+	db.Exec("PRAGMA foreign_keys = ON;")
+
+	const createSeasoningsSQL = `
+	CREATE TABLE IF NOT EXISTS refrigerator_seasonings (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		catalog_id INTEGER NOT NULL,
+		status TEXT NOT NULL,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		FOREIGN KEY (catalog_id) REFERENCES item_catalog (id)
+	);`
+	if _, err := db.Exec(createSeasoningsSQL); err != nil {
+		return fmt.Errorf("refrigerator_seasonings error: %w", err)
+	}
+
+	const createRecipesSQL = `
+	CREATE TABLE IF NOT EXISTS recipes (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		name TEXT NOT NULL UNIQUE,
+		yield TEXT,
+		process TEXT,
+		url TEXT,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	);`
+	if _, err := db.Exec(createRecipesSQL); err != nil {
+		return fmt.Errorf("recipes error: %w", err)
+	}
+	db.Exec("ALTER TABLE recipes ADD COLUMN yield TEXT;")
+
+	const createRecipeIngredientsSQL = `
+	CREATE TABLE IF NOT EXISTS recipe_ingredients (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		recipe_id INTEGER NOT NULL,
+		catalog_id INTEGER NOT NULL,
+		unit TEXT,
+		amount TEXT,
+		group_name TEXT,
+		FOREIGN KEY (recipe_id) REFERENCES recipes (id),
+		FOREIGN KEY (catalog_id) REFERENCES item_catalog (id)
+	);`
+	if _, err := db.Exec(createRecipeIngredientsSQL); err != nil {
+		return fmt.Errorf("recipe_ingredients error: %w", err)
+	}
+
+	db.Exec("ALTER TABLE recipe_ingredients ADD COLUMN unit TEXT;")
+	db.Exec("ALTER TABLE recipe_ingredients ADD COLUMN group_name TEXT;")
+
+	const createLocationsSQL = `
+	CREATE TABLE IF NOT EXISTS locations (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		name TEXT NOT NULL UNIQUE,
+		priority INTEGER
+	);`
+	if _, err := db.Exec(createLocationsSQL); err != nil {
+		return fmt.Errorf("locations error: %w", err)
+	}
+
+	var count int
+	err := db.QueryRow("SELECT COUNT(*) FROM locations").Scan(&count)
+	if err == nil && count == 0 {
+		defaults := []string{"冷蔵庫", "野菜室", "冷凍庫", "チルド", "常温", "その他"}
+		for i, name := range defaults {
+			db.Exec("INSERT INTO locations(name, priority) VALUES(?, ?)", name, i+1)
+		}
+	}
+
+	const createFridgePhotosSQL = `
+	CREATE TABLE IF NOT EXISTS fridge_photos (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		image_path TEXT NOT NULL,
+		location TEXT,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	);`
+	if _, err := db.Exec(createFridgePhotosSQL); err != nil {
+		return fmt.Errorf("fridge_photos error: %w", err)
+	}
+	db.Exec("ALTER TABLE fridge_photos ADD COLUMN location TEXT;")
+
+	const updateSeasoningsSQL = `
+	UPDATE item_catalog
+	SET category = '', default_unit = 'g'
+	WHERE classification = '調味料';`
+	db.Exec(updateSeasoningsSQL)
+
+	fmt.Println("Database initialized.")
+	return nil
+}
+
+
+----- C:\Users\wasab\OneDrive\デスクトップ\kimichan2\go.mod -----
+module kimichan
+
+go 1.24.3
+
+require github.com/mattn/go-sqlite3 v1.14.32
+
+
+----- C:\Users\wasab\OneDrive\デスクトップ\kimichan2\go.sum -----
+github.com/mattn/go-sqlite3 v1.14.32 h1:JD12Ag3oLy1zQA+BNn74xRgaBbdhbNIDYvQUEuuErjs=
+github.com/mattn/go-sqlite3 v1.14.32/go.mod h1:Uh1q+B4BYcTPb+yiD3kU8Ct7aC0hY9fxUwlHK0RXw+Y=
+
+
+----- C:\Users\wasab\OneDrive\デスクトップ\kimichan2\handlers_catalog.go -----
+package main
+
+import (
+	"database/sql"
+	"encoding/json"
+	"fmt"
+	"net/http"
+)
+
+func handleCatalog(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case "GET":
+		getCatalogItems(w, r)
+	case "POST":
+		addCatalogItems(w, r)
+	case "PUT":
+		updateCatalogItem(w, r)
+	default:
+		sendJSONError(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func getCatalogItems(w http.ResponseWriter, _ *http.Request) {
+	rows, err := db.Query("SELECT id, name, kana, classification, category, default_unit FROM item_catalog ORDER BY name ASC")
+	if err != nil {
+		sendJSONError(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	items := []CatalogItem{}
+	for rows.Next() {
+		var item CatalogItem
+		var kana sql.NullString
+		if err := rows.Scan(&item.ID, &item.Name, &kana, &item.Classification, &item.Category, &item.DefaultUnit); err != nil {
+			sendJSONError(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		item.Kana = kana.String
+		items = append(items, item)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(items)
+}
+
+func addCatalogItems(w http.ResponseWriter, r *http.Request) {
+	var items []CatalogItem
+	if err := json.NewDecoder(r.Body).Decode(&items); err != nil {
+		sendJSONError(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		sendJSONError(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	query := `
+	INSERT INTO item_catalog(name, kana, classification, category, default_unit) 
+	VALUES(?, ?, ?, ?, ?)
+	ON CONFLICT(name) DO UPDATE SET
+	kana = excluded.kana,
+	classification = excluded.classification,
+	category = excluded.category,
+	default_unit = excluded.default_unit
+	`
+
+	stmt, err := tx.Prepare(query)
+	if err != nil {
+		tx.Rollback()
+		sendJSONError(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer stmt.Close()
+
+	for _, item := range items {
+		if item.Name == "" {
+			tx.Rollback()
+			sendJSONError(w, "name required", http.StatusBadRequest)
+			return
+		}
+		if item.Classification == "調味料" {
+			item.Category = ""
+			item.DefaultUnit = "g"
+		}
+
+		// ★修正箇所: レシピからの自動登録時の単位上書きを防ぐため、空に設定
+		// ユーザーの指示（単位不要）を反映
+		item.DefaultUnit = ""
+
+		_, err := stmt.Exec(item.Name, item.Kana, item.Classification, item.Category, item.DefaultUnit)
+		if err != nil {
+			tx.Rollback()
+			sendJSONError(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		sendJSONError(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusCreated)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "success"})
+}
+
+func updateCatalogItem(w http.ResponseWriter, r *http.Request) {
+	type UpdateReq struct {
+		ID             int    `json:"id"`
+		Name           string `json:"name"`
+		Kana           string `json:"kana"`
+		Classification string `json:"classification"`
+		Category       string `json:"category"`
+		DefaultUnit    string `json:"default_unit"`
+		ForceMerge     bool   `json:"force_merge"`
+	}
+
+	var req UpdateReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		sendJSONError(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		sendJSONError(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	var targetID int
+	err = tx.QueryRow("SELECT id FROM item_catalog WHERE name = ? AND id != ?", req.Name, req.ID).Scan(&targetID)
+
+	if err == nil {
+		if !req.ForceMerge {
+			tx.Rollback()
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusConflict)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"error_code": "merge_confirmation_required",
+				"message":    fmt.Sprintf("「%s」は既に存在します。統合しますか？", req.Name),
+				"target_id":  targetID,
+			})
+			return
+		}
+
+		if _, err := tx.Exec("UPDATE refrigerator_ingredients SET catalog_id = ? WHERE catalog_id = ?", targetID, req.ID); err != nil {
+			tx.Rollback()
+			sendJSONError(w, "在庫マージ失敗", http.StatusInternalServerError)
+			return
+		}
+		if _, err := tx.Exec("UPDATE refrigerator_seasonings SET catalog_id = ? WHERE catalog_id = ?", targetID, req.ID); err != nil {
+			tx.Rollback()
+			sendJSONError(w, "調味料マージ失敗", http.StatusInternalServerError)
+			return
+		}
+		if _, err := tx.Exec("UPDATE recipe_ingredients SET catalog_id = ? WHERE catalog_id = ?", targetID, req.ID); err != nil {
+			tx.Rollback()
+			sendJSONError(w, "レシピマージ失敗", http.StatusInternalServerError)
+			return
+		}
+
+		if _, err := tx.Exec("DELETE FROM item_catalog WHERE id = ?", req.ID); err != nil {
+			tx.Rollback()
+			sendJSONError(w, "旧アイテム削除失敗", http.StatusInternalServerError)
+			return
+		}
+
+	} else {
+		query := `UPDATE item_catalog SET name=?, kana=?, classification=?, category=?, default_unit=? WHERE id=?`
+		if req.Classification == "調味料" {
+			req.Category = ""
+			req.DefaultUnit = "g"
+		}
+		if _, err := tx.Exec(query, req.Name, req.Kana, req.Classification, req.Category, req.DefaultUnit, req.ID); err != nil {
+			tx.Rollback()
+			sendJSONError(w, "更新失敗: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		sendJSONError(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "success"})
+}
+
+
+----- C:\Users\wasab\OneDrive\デスクトップ\kimichan2\handlers_export.go -----
+package main
+
+import (
+	"encoding/csv"
+	"fmt"
+	"net/http"
+	"time"
+)
+
+func exportCatalogCSV(w http.ResponseWriter, r *http.Request) {
+	rows, err := db.Query("SELECT name, classification, category, default_unit, kana FROM item_catalog ORDER BY classification, name")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	fileName := fmt.Sprintf("catalog_export_%s.csv", time.Now().Format("20060102150405"))
+	w.Header().Set("Content-Type", "text/csv")
+	w.Header().Set("Content-Disposition", "attachment; filename=\""+fileName+"\"")
+
+	writer := csv.NewWriter(w)
+	defer writer.Flush()
+
+	for rows.Next() {
+		var name, classification, category, defaultUnit, kana NullString
+		if err := rows.Scan(&name, &classification, &category, &defaultUnit, &kana); err != nil {
+			http.Error(w, "行データの読み取りに失敗しました: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		record := []string{name.String, classification.String, category.String, defaultUnit.String, kana.String}
+		if err := writer.Write(record); err != nil {
+			http.Error(w, "CSV行の書き込みに失敗しました: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
+	if err := rows.Err(); err != nil {
+		http.Error(w, "行の処理中にエラーが発生しました: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+}
+
+
+----- C:\Users\wasab\OneDrive\デスクトップ\kimichan2\handlers_fridge_photos.go -----
+package main
+
+import (
+	"database/sql"
+	"encoding/json"
+	"fmt"
+	"net/http"
+)
+
+func handleFridgePhotos(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case "GET":
+		getFridgePhotos(w, r)
+	case "POST":
+		addFridgePhoto(w, r)
+	case "DELETE":
+		deleteFridgePhoto(w, r)
+	default:
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func getFridgePhotos(w http.ResponseWriter, _ *http.Request) {
+	// location も取得するように変更
+	rows, err := db.Query("SELECT id, image_path, location, created_at FROM fridge_photos ORDER BY id DESC")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	photos := []FridgePhoto{}
+	for rows.Next() {
+		var p FridgePhoto
+		var loc sql.NullString
+		// location をスキャン
+		if err := rows.Scan(&p.ID, &p.ImagePath, &loc, &p.CreatedAt); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		p.Location = loc.String
+		photos = append(photos, p)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(photos)
+}
+
+func addFridgePhoto(w http.ResponseWriter, r *http.Request) {
+	var p FridgePhoto
+	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if p.ImagePath == "" {
+		http.Error(w, "image_path required", http.StatusBadRequest)
+		return
+	}
+	// 場所が指定されていなければ「その他」とする
+	if p.Location == "" {
+		p.Location = "その他"
+	}
+
+	// location をDBに保存
+	res, err := db.Exec("INSERT INTO fridge_photos(image_path, location) VALUES(?, ?)", p.ImagePath, p.Location)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	id, _ := res.LastInsertId()
+	p.ID = int(id)
+
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(p)
+}
+
+func deleteFridgePhoto(w http.ResponseWriter, r *http.Request) {
+	idStr := r.URL.Query().Get("id")
+	if idStr == "" {
+		http.Error(w, "id required", http.StatusBadRequest)
+		return
+	}
+	var id int
+	fmt.Sscanf(idStr, "%d", &id)
+
+	_, err := db.Exec("DELETE FROM fridge_photos WHERE id = ?", id)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{"status": "deleted"})
+}
+
+
+----- C:\Users\wasab\OneDrive\デスクトップ\kimichan2\handlers_import.go -----
+package main
+
+import (
+	"bytes"
+	"encoding/csv"
+	"encoding/json"
+	"io"
+	"net/http"
+	"strings"
+)
+
+type ImportResult struct {
+	Added   int      `json:"added"`
+	Skipped int      `json:"skipped"`
+	Errors  []string `json:"errors,omitempty"`
+}
+
+func handleCatalogImport(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	bodyBytes, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, "データの読み込みに失敗しました", http.StatusBadRequest)
+		return
+	}
+	r.Body.Close()
+
+	if len(bodyBytes) >= 3 && bodyBytes[0] == 0xEF && bodyBytes[1] == 0xBB && bodyBytes[2] == 0xBF {
+		bodyBytes = bodyBytes[3:]
+	}
+
+	reader := csv.NewReader(bytes.NewReader(bodyBytes))
+	reader.FieldsPerRecord = -1
+
+	tx, err := db.Begin()
+	if err != nil {
+		http.Error(w, "データベースエラー: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	checkStmt, err := tx.Prepare("SELECT id FROM item_catalog WHERE name = ?")
+	if err != nil {
+		tx.Rollback()
+		http.Error(w, "DB準備エラー: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer checkStmt.Close()
+
+	insertStmt, err := tx.Prepare("INSERT INTO item_catalog (name, classification, category, default_unit, kana) VALUES (?, ?, ?, ?, ?)")
+	if err != nil {
+		tx.Rollback()
+		http.Error(w, "DB準備エラー: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer insertStmt.Close()
+
+	result := ImportResult{}
+
+	for {
+		record, err := reader.Read()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			continue
+		}
+		if len(record) < 1 {
+			continue
+		}
+
+		name := strings.TrimSpace(record[0])
+		if name == "" {
+			continue
+		}
+
+		classification := "食材"
+		if len(record) > 1 {
+			classification = strings.TrimSpace(record[1])
+		}
+
+		category := ""
+		if len(record) > 2 {
+			category = strings.TrimSpace(record[2])
+		}
+
+		unit := ""
+		if len(record) > 3 {
+			unit = strings.TrimSpace(record[3])
+		}
+
+		kana := ""
+		if len(record) > 4 {
+			kana = strings.TrimSpace(record[4])
+		}
+
+		if classification == "" {
+			classification = "食材"
+		}
+		if classification == "調味料" {
+			category = ""
+		}
+
+		var existingID int
+		err = checkStmt.QueryRow(name).Scan(&existingID)
+		if err == nil {
+			result.Skipped++
+			continue
+		}
+
+		_, err = insertStmt.Exec(name, classification, category, unit, kana)
+		if err != nil {
+			result.Errors = append(result.Errors, name+": "+err.Error())
+			continue
+		}
+		result.Added++
+	}
+
+	if err := tx.Commit(); err != nil {
+		http.Error(w, "保存に失敗しました: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(result)
+}
+
+
+----- C:\Users\wasab\OneDrive\デスクトップ\kimichan2\handlers_ingredients.go -----
+package main
+
+import (
+	"database/sql"
+	"encoding/json"
+	"fmt"
+	"net/http"
+)
+
+func handleIngredients(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case "GET":
+		getIngredients(w, r)
+	case "POST":
+		addIngredient(w, r)
+	case "PUT":
+		updateIngredient(w, r)
+	case "DELETE":
+		deleteIngredient(w, r)
+	default:
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func getIngredients(w http.ResponseWriter, _ *http.Request) {
+	const query = `
+		SELECT
+			i.id, i.catalog_id, i.amount, i.unit, i.expiration_date, i.location, 
+			i.created_at, i.updated_at, c.name,
+			(SELECT COUNT(DISTINCT recipe_id) FROM recipe_ingredients WHERE catalog_id = i.catalog_id) as recipe_count
+		FROM refrigerator_ingredients i
+		JOIN item_catalog c ON i.catalog_id = c.id
+		LEFT JOIN locations l ON i.location = l.name
+		ORDER BY 
+			CASE WHEN l.priority IS NULL THEN 9999 ELSE l.priority END ASC,
+			c.kana ASC,
+			c.name ASC;
+	`
+	rows, err := db.Query(query)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	items := []Ingredient{}
+	for rows.Next() {
+		var item Ingredient
+		var loc sql.NullString
+
+		if err := rows.Scan(&item.ID, &item.CatalogID, &item.Amount, &item.Unit, &item.ExpirationDate, &loc, &item.CreatedAt, &item.UpdatedAt, &item.Name, &item.RecipeCount); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		item.Location = loc.String
+		items = append(items, item)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(items)
+}
+
+func addIngredient(w http.ResponseWriter, r *http.Request) {
+	var item Ingredient
+	if err := json.NewDecoder(r.Body).Decode(&item); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if item.CatalogID == 0 {
+		http.Error(w, "catalog_id required", http.StatusBadRequest)
+		return
+	}
+	if item.Location == "" {
+		item.Location = "その他"
+	}
+
+	stmt, err := db.Prepare("INSERT INTO refrigerator_ingredients(catalog_id, amount, unit, expiration_date, location) VALUES(?, ?, ?, ?, ?)")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer stmt.Close()
+
+	res, err := stmt.Exec(item.CatalogID, item.Amount, item.Unit, item.ExpirationDate, item.Location)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	id, _ := res.LastInsertId()
+	item.ID = int(id)
+
+	w.WriteHeader(http.StatusCreated)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(item)
+}
+
+func updateIngredient(w http.ResponseWriter, r *http.Request) {
+	var item Ingredient
+	if err := json.NewDecoder(r.Body).Decode(&item); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if item.ID == 0 {
+		http.Error(w, "id required", http.StatusBadRequest)
+		return
+	}
+
+	_, err := db.Exec("UPDATE refrigerator_ingredients SET amount=?, expiration_date=?, location=?, updated_at=datetime('now','localtime') WHERE id=?", item.Amount, item.ExpirationDate, item.Location, item.ID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{"status": "updated"})
+}
+
+func deleteIngredient(w http.ResponseWriter, r *http.Request) {
+	idStr := r.URL.Query().Get("id")
+	if idStr == "" {
+		http.Error(w, "id required", http.StatusBadRequest)
+		return
+	}
+
+	var id int
+	fmt.Sscanf(idStr, "%d", &id)
+
+	_, err := db.Exec("DELETE FROM refrigerator_ingredients WHERE id=?", id)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{"status": "deleted"})
+}
+
+
+----- C:\Users\wasab\OneDrive\デスクトップ\kimichan2\handlers_locations.go -----
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"net/http"
+)
+
+// ★削除: type Location struct ... の定義をここから消去します
+// （models.go に定義済みのため）
+
+func handleLocations(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case "GET":
+		getLocations(w, r)
+	case "POST":
+		addLocation(w, r)
+	case "PUT":
+		reorderLocations(w, r)
+	case "DELETE":
+		deleteLocation(w, r)
+	default:
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func getLocations(w http.ResponseWriter, _ *http.Request) {
+	rows, err := db.Query("SELECT id, name, priority FROM locations ORDER BY priority ASC")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	locations := []Location{}
+	for rows.Next() {
+		var l Location
+		if err := rows.Scan(&l.ID, &l.Name, &l.Priority); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		locations = append(locations, l)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(locations)
+}
+
+func addLocation(w http.ResponseWriter, r *http.Request) {
+	var l Location
+	if err := json.NewDecoder(r.Body).Decode(&l); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if l.Name == "" {
+		http.Error(w, "name required", http.StatusBadRequest)
+		return
+	}
+
+	var maxPriority int
+	db.QueryRow("SELECT COALESCE(MAX(priority), 0) FROM locations").Scan(&maxPriority)
+
+	res, err := db.Exec("INSERT INTO locations(name, priority) VALUES(?, ?)", l.Name, maxPriority+1)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	id, _ := res.LastInsertId()
+	l.ID = int(id)
+	l.Priority = maxPriority + 1
+
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(l)
+}
+
+func deleteLocation(w http.ResponseWriter, r *http.Request) {
+	idStr := r.URL.Query().Get("id")
+	if idStr == "" {
+		http.Error(w, "id required", http.StatusBadRequest)
+		return
+	}
+	var id int
+	fmt.Sscanf(idStr, "%d", &id)
+
+	_, err := db.Exec("DELETE FROM locations WHERE id = ?", id)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{"status": "deleted"})
+}
+
+func reorderLocations(w http.ResponseWriter, r *http.Request) {
+	var items []Location
+	if err := json.NewDecoder(r.Body).Decode(&items); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	for i, item := range items {
+		_, err := tx.Exec("UPDATE locations SET priority = ? WHERE id = ?", i+1, item.ID)
+		if err != nil {
+			tx.Rollback()
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
+
+	tx.Commit()
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{"status": "success"})
+}
+
+
+----- C:\Users\wasab\OneDrive\デスクトップ\kimichan2\handlers_photos.go -----
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"path/filepath"
+	"time"
+)
+
+func handleUpload(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	r.ParseMultipartForm(10 << 20)
+
+	file, handler, err := r.FormFile("photo")
+	if err != nil {
+		http.Error(w, "画像が見つかりません", http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
+
+	ext := filepath.Ext(handler.Filename)
+	if ext == "" {
+		ext = ".jpg"
+	}
+	filename := fmt.Sprintf("img_%d%s", time.Now().UnixNano(), ext)
+
+	savePath := filepath.Join(DataDir, "images", filename)
+
+	dst, err := os.Create(savePath)
+	if err != nil {
+		http.Error(w, "保存に失敗しました: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer dst.Close()
+
+	if _, err := io.Copy(dst, file); err != nil {
+		http.Error(w, "書き込みに失敗しました", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{
+		"status":   "success",
+		"filename": filename,
+	})
+}
+
+
+----- C:\Users\wasab\OneDrive\デスクトップ\kimichan2\handlers_recipes.go -----
+package main
+
+import (
+	"bufio"
+	"database/sql"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"strings"
+)
+
+type RecipeRequest struct {
+	Name    string `json:"name"`
+	Yield   string `json:"yield"`
+	Process string `json:"process"`
+	URL     string `json:"url"`
+	CsvData string `json:"csv_data"`
+}
+
+type RecipeResponse struct {
+	Recipe
+	HasIngredients bool `json:"has_ingredients"`
+	HasSeasonings  bool `json:"has_seasonings"`
+}
+
+func handleRecipes(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case "GET":
+		getRecipes(w, r)
+	case "POST":
+		addRecipe(w, r)
+	case "PUT":
+		updateRecipe(w, r)
+	default:
+		sendJSONError(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func sendJSONError(w http.ResponseWriter, message string, code int) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	json.NewEncoder(w).Encode(map[string]string{"error": message})
+}
+
+func sendMissingIngredientsError(w http.ResponseWriter, items []string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusBadRequest)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"error_code": "missing_ingredients",
+		"items":      items,
+	})
+}
+
+func getRecipes(w http.ResponseWriter, r *http.Request) {
+	filterIngredientID := r.URL.Query().Get("ingredient_id")
+
+	var rows *sql.Rows
+	var err error
+	if filterIngredientID != "" {
+		query := `SELECT r.id, r.name, r.yield, r.process, r.url, r.created_at FROM recipes r JOIN recipe_ingredients ri ON r.id = ri.recipe_id WHERE ri.catalog_id = ? ORDER BY r.created_at DESC`
+		rows, err = db.Query(query, filterIngredientID)
+	} else {
+		query := `SELECT id, name, yield, process, url, created_at FROM recipes ORDER BY created_at DESC`
+		rows, err = db.Query(query)
+	}
+	if err != nil {
+		sendJSONError(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	recipes := []RecipeResponse{}
+	for rows.Next() {
+		var r RecipeResponse
+		var yield sql.NullString
+		if err := rows.Scan(&r.ID, &r.Name, &yield, &r.Process, &r.URL, &r.CreatedAt); err != nil {
+			continue
+		}
+		r.Yield = yield.String
+		recipes = append(recipes, r)
+	}
+
+	invMap := make(map[int]bool)
+	rowsInv, _ := db.Query("SELECT catalog_id FROM refrigerator_ingredients")
+	if rowsInv != nil {
+		for rowsInv.Next() {
+			var cid int
+			rowsInv.Scan(&cid)
+			invMap[cid] = true
+		}
+		rowsInv.Close()
+	}
+
+	seasMap := make(map[int]bool)
+	rowsSeas, _ := db.Query("SELECT catalog_id FROM refrigerator_seasonings WHERE status != 'なし'")
+	if rowsSeas != nil {
+		for rowsSeas.Next() {
+			var cid int
+			rowsSeas.Scan(&cid)
+			seasMap[cid] = true
+		}
+		rowsSeas.Close()
+	}
+
+	for i := range recipes {
+		hasIng := true
+		hasSeas := true
+
+		ingRows, err := db.Query("SELECT ri.catalog_id, c.classification FROM recipe_ingredients ri JOIN item_catalog c ON ri.catalog_id = c.id WHERE ri.recipe_id = ?", recipes[i].ID)
+		if err == nil {
+			for ingRows.Next() {
+				var cid int
+				var cls string
+				ingRows.Scan(&cid, &cls)
+
+				if cls == "調味料" {
+					if !seasMap[cid] {
+						hasSeas = false
+					}
+				} else {
+					if !invMap[cid] {
+						hasIng = false
+					}
+				}
+			}
+			ingRows.Close()
+		}
+		recipes[i].HasIngredients = hasIng
+		recipes[i].HasSeasonings = hasSeas
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(recipes)
+}
+
+func addRecipe(w http.ResponseWriter, r *http.Request) {
+	saveRecipeCommon(w, r, 0)
+}
+
+func updateRecipe(w http.ResponseWriter, r *http.Request) {
+	idStr := r.URL.Query().Get("id")
+	if idStr == "" {
+		sendJSONError(w, "ID required", http.StatusBadRequest)
+		return
+	}
+	var id int
+	fmt.Sscanf(idStr, "%d", &id)
+	saveRecipeCommon(w, r, id)
+}
+func saveRecipeCommon(w http.ResponseWriter, r *http.Request, id int) {
+	var req RecipeRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		sendJSONError(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if req.Name == "" {
+		sendJSONError(w, "レシピ名は必須です", http.StatusBadRequest)
+		return
+	}
+
+	type parsedIng struct {
+		CatalogID int
+		Unit      string
+		Amount    string
+		GroupName string
+	}
+	var ingredients []parsedIng
+	var unknownItems []string
+
+	tx, err := db.Begin()
+	if err != nil {
+		sendJSONError(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// ★修正箇所: スラッシュを改行コードに置換し、解析を容易にする
+	csvDataProcessed := strings.ReplaceAll(req.CsvData, "/", "\n")
+
+	scanner := bufio.NewScanner(strings.NewReader(csvDataProcessed))
+	var currentGroup string
+
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+
+		if strings.HasPrefix(line, "=") || strings.HasPrefix(line, "＝") {
+			currentGroup = strings.Trim(line, "=＝ \t　")
+			continue
+		}
+
+		var name, amount, unit string
+
+		if strings.Contains(line, "…") {
+			parts := strings.SplitN(line, "…", 2)
+			name = strings.TrimSpace(parts[0])
+			if len(parts) > 1 {
+				amount = strings.TrimSpace(parts[1])
+			}
+		} else if strings.Contains(line, "...") {
+			parts := strings.SplitN(line, "...", 2)
+			name = strings.TrimSpace(parts[0])
+			if len(parts) > 1 {
+				amount = strings.TrimSpace(parts[1])
+			}
+		} else if strings.Contains(line, ",") {
+			parts := strings.Split(line, ",")
+			name = strings.TrimSpace(parts[0])
+			if len(parts) > 1 {
+				amount = strings.TrimSpace(parts[1])
+			}
+			if len(parts) > 2 {
+				unit = strings.TrimSpace(parts[2])
+			}
+		} else {
+			name = line
+		}
+
+		if name == "" {
+			continue
+		}
+
+		var catalogID int
+		err = tx.QueryRow("SELECT id FROM item_catalog WHERE name = ? OR kana = ?", name, name).Scan(&catalogID)
+		if err != nil {
+			unknownItems = append(unknownItems, name)
+			continue
+		}
+
+		ingredients = append(ingredients, parsedIng{
+			CatalogID: catalogID,
+			Unit:      unit,
+			Amount:    amount,
+			GroupName: currentGroup,
+		})
+	}
+
+	if len(unknownItems) > 0 {
+		tx.Rollback()
+		sendMissingIngredientsError(w, unknownItems)
+		return
+	}
+
+	if id == 0 {
+		res, err := tx.Exec("INSERT INTO recipes(name, yield, process, url) VALUES(?, ?, ?, ?)", req.Name, req.Yield, req.Process, req.URL)
+		if err != nil {
+			tx.Rollback()
+			sendJSONError(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		newID, _ := res.LastInsertId()
+		id = int(newID)
+	} else {
+		_, err := tx.Exec("UPDATE recipes SET name=?, yield=?, process=?, url=? WHERE id=?", req.Name, req.Yield, req.Process, req.URL, id)
+		if err != nil {
+			tx.Rollback()
+			sendJSONError(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		_, err = tx.Exec("DELETE FROM recipe_ingredients WHERE recipe_id=?", id)
+		if err != nil {
+			tx.Rollback()
+			sendJSONError(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
+
+	ingStmt, err := tx.Prepare("INSERT INTO recipe_ingredients(recipe_id, catalog_id, unit, amount, group_name) VALUES(?, ?, ?, ?, ?)")
+	if err != nil {
+		tx.Rollback()
+		sendJSONError(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer ingStmt.Close()
+
+	for _, ing := range ingredients {
+		if _, err := ingStmt.Exec(id, ing.CatalogID, ing.Unit, ing.Amount, ing.GroupName); err != nil {
+			tx.Rollback()
+			sendJSONError(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		sendJSONError(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "success"})
+}
+
+func handleRecipeIngredients(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "GET" {
+		sendJSONError(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	recipeID := r.URL.Query().Get("id")
+	if recipeID == "" {
+		sendJSONError(w, "id is required", http.StatusBadRequest)
+		return
+	}
+
+	query := `
+		SELECT 
+			c.name, 
+			ri.amount, 
+			ri.unit,
+			ri.group_name,
+			CASE 
+				WHEN c.classification = '調味料' THEN 
+					(SELECT COUNT(*) FROM refrigerator_seasonings WHERE catalog_id = c.id AND status != 'なし')
+				ELSE 
+					(SELECT COUNT(*) FROM refrigerator_ingredients WHERE catalog_id = c.id)
+			END as stock_count
+		FROM recipe_ingredients ri
+		JOIN item_catalog c ON ri.catalog_id = c.id
+		WHERE ri.recipe_id = ?
+	`
+
+	rows, err := db.Query(query, recipeID)
+	if err != nil {
+		sendJSONError(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	type ResIngredient struct {
+		Name      string `json:"name"`
+		Amount    string `json:"amount"`
+		Unit      string `json:"unit"`
+		GroupName string `json:"group_name"`
+		InStock   bool   `json:"in_stock"`
+	}
+
+	var ingredients []ResIngredient
+	for rows.Next() {
+		var i ResIngredient
+		var stockCount int
+		var gn sql.NullString
+		if err := rows.Scan(&i.Name, &i.Amount, &i.Unit, &gn, &stockCount); err != nil {
+			sendJSONError(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		i.GroupName = gn.String
+		i.InStock = (stockCount > 0)
+		ingredients = append(ingredients, i)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(ingredients)
+}
+
+
+----- C:\Users\wasab\OneDrive\デスクトップ\kimichan2\handlers_seasonings.go -----
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"net/http"
+)
+
+func handleSeasonings(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case "GET":
+		getSeasonings(w, r)
+	case "POST":
+		addSeasoning(w, r)
+	case "DELETE":
+		deleteSeasoning(w, r)
+	default:
+		http.Error(w, "サポートされていないメソッドです。", http.StatusMethodNotAllowed)
+	}
+}
+
+func getSeasonings(w http.ResponseWriter, _ *http.Request) {
+	const query = `
+		SELECT
+			s.id, s.catalog_id, s.status, s.created_at, s.updated_at,
+			c.name, c.classification, c.category
+		FROM refrigerator_seasonings s
+		JOIN item_catalog c ON s.catalog_id = c.id
+		ORDER BY c.name ASC;
+	`
+	rows, err := db.Query(query)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	items := []Seasoning{}
+	for rows.Next() {
+		var item Seasoning
+		if err := rows.Scan(
+			&item.ID, &item.CatalogID, &item.Status, &item.CreatedAt, &item.UpdatedAt,
+			&item.Name, &item.Classification, &item.Category,
+		); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		items = append(items, item)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(items)
+}
+
+func addSeasoning(w http.ResponseWriter, r *http.Request) {
+	var item Seasoning
+	if err := json.NewDecoder(r.Body).Decode(&item); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if item.CatalogID == 0 {
+		http.Error(w, "catalog_idは必須です", http.StatusBadRequest)
+		return
+	}
+	if item.Status == "" {
+		item.Status = "あり"
+	}
+
+	stmt, err := db.Prepare("INSERT INTO refrigerator_seasonings(catalog_id, status) VALUES(?, ?)")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer stmt.Close()
+
+	res, err := stmt.Exec(item.CatalogID, item.Status)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	id, _ := res.LastInsertId()
+	item.ID = int(id)
+
+	w.WriteHeader(http.StatusCreated)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(item)
+}
+
+func deleteSeasoning(w http.ResponseWriter, r *http.Request) {
+	idStr := r.URL.Query().Get("id")
+	if idStr == "" {
+		http.Error(w, "id required", http.StatusBadRequest)
+		return
+	}
+
+	var id int
+	fmt.Sscanf(idStr, "%d", &id)
+
+	_, err := db.Exec("DELETE FROM refrigerator_seasonings WHERE id=?", id)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{"status": "deleted"})
+}
+
+
+----- C:\Users\wasab\OneDrive\デスクトップ\kimichan2\main.go -----
+package main
+
+import (
+	"database/sql"
+	"embed"
+	"fmt"
+	"io/fs"
+	"log"
+	"net/http"
+	"os"
+	"path/filepath"
+
+	_ "github.com/mattn/go-sqlite3"
+)
+
+//go:embed static/*
+var staticFiles embed.FS
+
+var DataDir string
+
+func main() {
+	currentDir, err := os.Getwd()
+	if err != nil {
+		log.Fatal(err)
+	}
+	DataDir = currentDir
+
+	imagesPath := filepath.Join(DataDir, "images")
+	if err := os.MkdirAll(imagesPath, 0755); err != nil {
+		log.Fatal(err)
+	}
+
+	dbPath := filepath.Join(DataDir, "kimichan.db")
+	db, err = sql.Open("sqlite3", dbPath)
+	if err != nil {
+		log.Fatalf("DB connection failed: %v", err)
+	}
+	defer db.Close()
+
+	if err := initDatabase(); err != nil {
+		log.Fatalf("DB init failed: %v", err)
+	}
+
+	mux := http.NewServeMux()
+
+	mux.HandleFunc("/api/catalog", handleCatalog)
+	mux.HandleFunc("/api/catalog/export", exportCatalogCSV)
+	mux.HandleFunc("/api/ingredients", handleIngredients)
+	mux.HandleFunc("/api/seasonings", handleSeasonings)
+	mux.HandleFunc("/api/recipes", handleRecipes)
+	mux.HandleFunc("/api/recipes/ingredients", handleRecipeIngredients)
+	mux.HandleFunc("/api/locations", handleLocations)
+	mux.HandleFunc("/import/catalog", handleCatalogImport)
+	mux.HandleFunc("/api/upload", handleUpload)
+	mux.HandleFunc("/api/fridge_photos", handleFridgePhotos)
+
+	mux.Handle("/images/", http.StripPrefix("/images/", http.FileServer(http.Dir(imagesPath))))
+
+	staticFS, _ := fs.Sub(staticFiles, "static")
+	mux.Handle("/", http.FileServer(http.FS(staticFS)))
+
+	fmt.Println("Server is running at http://localhost:8080")
+	if err := http.ListenAndServe(":8080", mux); err != nil {
+		log.Fatal(err)
+	}
+}
+
+
+----- C:\Users\wasab\OneDrive\デスクトップ\kimichan2\models.go -----
+package main
+
+import (
+	"database/sql"
+	"encoding/json"
+)
+
+type CatalogItem struct {
+	ID             int    `json:"id"`
+	Name           string `json:"name"`
+	Kana           string `json:"kana"`
+	Classification string `json:"classification"`
+	Category       string `json:"category"`
+	DefaultUnit    string `json:"default_unit"`
+}
+
+type Ingredient struct {
+	ID             int     `json:"id"`
+	CatalogID      int     `json:"catalog_id"`
+	Amount         float64 `json:"amount"`
+	Unit           string  `json:"unit"`
+	ExpirationDate string  `json:"expiration_date"`
+	Location       string  `json:"location"`
+	CreatedAt      string  `json:"created_at"`
+	UpdatedAt      string  `json:"updated_at"`
+	Name           string  `json:"name,omitempty"`
+	RecipeCount    int     `json:"recipe_count"`
+}
+
+type Seasoning struct {
+	ID             int    `json:"id"`
+	CatalogID      int    `json:"catalog_id"`
+	Status         string `json:"status"`
+	CreatedAt      string `json:"created_at"`
+	UpdatedAt      string `json:"updated_at"`
+	Name           string `json:"name,omitempty"`
+	Classification string `json:"classification,omitempty"`
+	Category       string `json:"category,omitempty"`
+}
+
+type Recipe struct {
+	ID          int                `json:"id"`
+	Name        string             `json:"name"`
+	Yield       string             `json:"yield"`
+	Process     string             `json:"process"`
+	URL         string             `json:"url"`
+	SourceType  string             `json:"source_type"`
+	CreatedAt   string             `json:"created_at"`
+	Ingredients []RecipeIngredient `json:"ingredients,omitempty"`
+}
+
+type RecipeIngredient struct {
+	ID        int    `json:"id"`
+	RecipeID  int    `json:"recipe_id"`
+	CatalogID int    `json:"catalog_id"`
+	Name      string `json:"name"`
+	Quantity  string `json:"quantity"`
+	GroupName string `json:"group_name"`
+}
+
+type FridgePhoto struct {
+	ID        int    `json:"id"`
+	ImagePath string `json:"image_path"`
+	Location  string `json:"location"` // 追加
+	CreatedAt string `json:"created_at"`
+}
+
+type Location struct {
+	ID       int    `json:"id"`
+	Name     string `json:"name"`
+	Priority int    `json:"priority"`
+}
+
+type NullString struct {
+	sql.NullString
+}
+
+func (ns *NullString) Scan(value interface{}) error {
+	return ns.NullString.Scan(value)
+}
+
+func (ns NullString) MarshalJSON() ([]byte, error) {
+	if ns.Valid {
+		return json.Marshal(ns.String)
+	}
+	return json.Marshal(nil)
+}
+
+

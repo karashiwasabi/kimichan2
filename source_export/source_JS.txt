@@ -1,0 +1,1611 @@
+----- C:\Users\wasab\OneDrive\デスクトップ\kimichan2\static\js\app.js -----
+document.addEventListener('DOMContentLoaded', () => {
+    const appContainer = document.getElementById('app-container');
+    const navItems = document.querySelectorAll('.nav-item');
+
+    function loadView(viewName) {
+        // ナビゲーションの見た目を更新
+        navItems.forEach(nav => {
+            if (nav.dataset.view === viewName) {
+                nav.classList.add('active');
+            } else {
+                nav.classList.remove('active');
+            }
+        });
+
+        fetch(`views/${viewName}_view.html`)
+            .then(response => {
+                if (!response.ok) throw new Error('View not found');
+                return response.text();
+            })
+            .then(html => {
+                appContainer.innerHTML = html;
+                
+                if (viewName === 'catalog' && typeof initCatalog === 'function') {
+                    initCatalog();
+                } else if (viewName === 'inventory' && typeof initInventory === 'function') {
+                    initInventory();
+                } else if (viewName === 'seasoning' && typeof initSeasoning === 'function') {
+                    initSeasoning();
+                } else if (viewName === 'recipes' && typeof initRecipes === 'function') {
+                    initRecipes(); // 追加
+                }
+            })
+            .catch(err => {
+                appContainer.innerHTML = '<p style="text-align:center; margin-top:50px;">読み込みエラー</p>';
+                console.error(err);
+            });
+    }
+
+    navItems.forEach(item => {
+        item.addEventListener('click', (e) => {
+            e.preventDefault();
+            const viewName = item.dataset.view;
+            loadView(viewName);
+        });
+    });
+
+    // 初期表示
+    loadView('inventory');
+});
+
+----- C:\Users\wasab\OneDrive\デスクトップ\kimichan2\static\js\catalog.js -----
+let catalogData = [];
+let currentCategory = 'すべて';
+
+function initCatalog() {
+    fetchCatalog();
+    setupCatalogUI();
+}
+
+function fetchCatalog() {
+    fetch('/api/catalog')
+        .then(res => res.json())
+        .then(data => {
+            catalogData = data;
+            renderCategoryButtons(catalogData);
+            filterAndRender();
+        })
+        .catch(err => console.error('Fetch error:', err));
+}
+
+function renderCategoryButtons(items) {
+    const container = document.getElementById('category-filters');
+    if (!container) return;
+
+    const categories = new Set(['すべて']);
+    items.forEach(item => {
+        if (item.category) categories.add(item.category);
+        else if (item.classification === '調味料') categories.add('調味料');
+        else categories.add('未分類');
+    });
+
+    container.innerHTML = '';
+    categories.forEach(cat => {
+        const displayCat = cat === '未分類' ? 'その他' : cat;
+        const btn = document.createElement('div');
+        btn.className = `cat-chip ${cat === currentCategory ? 'active' : ''}`;
+        btn.textContent = displayCat;
+        btn.onclick = () => {
+            currentCategory = cat;
+            document.querySelectorAll('.cat-chip').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            filterAndRender();
+        };
+        container.appendChild(btn);
+    });
+}
+
+function filterAndRender() {
+    const term = document.getElementById('catalog-search').value.toLowerCase();
+    
+    let displayData = [...catalogData];
+
+    // ソートロジックの修正
+    if (currentCategory === 'すべて') {
+        // 全て表示: ID降順（新着順）
+        displayData.sort((a, b) => b.id - a.id);
+    } else {
+        // その他カテゴリ: かな(名前)昇順
+        displayData.sort((a, b) => {
+            const ka = a.kana || a.name;
+            const kb = b.kana || b.name;
+            return ka.localeCompare(kb, 'ja');
+        });
+    }
+
+    const filtered = displayData.filter(item => {
+        let catMatch = true;
+        if (currentCategory !== 'すべて') {
+            const itemCat = item.category || (item.classification === '調味料' ? '調味料' : '未分類');
+            catMatch = (itemCat === currentCategory);
+        }
+
+        let termMatch = true;
+        if (term) {
+            termMatch = 
+                item.name.toLowerCase().includes(term) || 
+                (item.kana && item.kana.toLowerCase().includes(term)) ||
+                (item.category && item.category.toLowerCase().includes(term));
+        }
+
+        return catMatch && termMatch;
+    });
+    renderCatalog(filtered);
+}
+
+function renderCatalog(items) {
+    const listEl = document.getElementById('catalog-list');
+    if (!listEl) return;
+    
+    listEl.innerHTML = '';
+    items.forEach(item => {
+        const div = document.createElement('div');
+        div.className = 'card';
+        div.onclick = () => openCatalogEditModal(item);
+        
+        const tagText = `${item.classification} / ${item.category || (item.classification === '調味料' ? 'スパイス等' : '未分類')}`;
+
+        div.innerHTML = `
+            <div class="card-content">
+                <span class="tag">${tagText}</span>
+                <div class="item-name">
+                    ${item.name}
+                    ${item.kana ? `<span style="font-size:11px; color:#999; font-weight:normal; margin-left:5px;">(${item.kana})</span>` : ''}
+                </div>
+            </div>
+            <div class="item-unit">${item.default_unit || ''}</div>
+        `;
+        listEl.appendChild(div);
+    });
+}
+
+function openCatalogEditModal(item) {
+    const overlay = document.getElementById('modal-overlay');
+    const title = document.getElementById('modal-title');
+    const tabSingle = document.getElementById('tab-single');
+    const tabCsv = document.getElementById('tab-csv');
+    const singleContainer = document.getElementById('form-single');
+    const csvContainer = document.getElementById('form-csv');
+    
+    tabSingle.classList.add('active');
+    tabCsv.classList.remove('active');
+    singleContainer.style.display = 'block';
+    csvContainer.style.display = 'none';
+    document.getElementById('csv-result-area').style.display = 'none';
+    
+    title.textContent = 'アイテム編集';
+
+    document.getElementById('edit-id').value = item.id;
+    document.getElementById('original-unit').value = item.default_unit || '';
+    document.getElementById('input-classification').value = item.classification;
+    
+    updateCategorySelect(item.category);
+    
+    document.getElementById('input-name').value = item.name;
+    document.getElementById('input-kana').value = item.kana || '';
+    document.getElementById('input-unit').value = item.default_unit;
+
+    overlay.classList.add('active');
+}
+
+function updateCategorySelect(selectedCategory) {
+    const select = document.getElementById('select-category');
+    const input = document.getElementById('input-category');
+    
+    const categories = new Set();
+    catalogData.forEach(d => {
+        if(d.category) categories.add(d.category);
+    });
+
+    select.innerHTML = '<option value="">(新規入力)</option>';
+    categories.forEach(c => {
+        const opt = document.createElement('option');
+        opt.value = c;
+        opt.textContent = c;
+        select.appendChild(opt);
+    });
+
+    if (categories.has(selectedCategory)) {
+        select.value = selectedCategory;
+        input.style.display = 'none';
+        input.value = selectedCategory;
+    } else {
+        select.value = "";
+        input.style.display = 'block';
+        input.value = selectedCategory || "";
+    }
+
+    select.onchange = () => {
+        if (select.value === "") {
+            input.style.display = 'block';
+            input.value = "";
+        } else {
+            input.style.display = 'none';
+            input.value = select.value;
+        }
+    };
+}
+
+function setupCatalogUI() {
+    const fab = document.getElementById('fab-add');
+    const overlay = document.getElementById('modal-overlay');
+    const btnCancel = document.getElementById('btn-cancel');
+    const btnSave = document.getElementById('btn-save');
+    const tabSingle = document.getElementById('tab-single');
+    const tabCsv = document.getElementById('tab-csv');
+    const singleContainer = document.getElementById('form-single');
+    const csvContainer = document.getElementById('form-csv');
+    const searchInput = document.getElementById('catalog-search');
+
+    const scrollLeft = document.getElementById('scroll-left');
+    const scrollRight = document.getElementById('scroll-right');
+    const scrollContainer = document.getElementById('category-filters');
+
+    if(scrollLeft && scrollContainer) {
+        scrollLeft.onclick = () => scrollContainer.scrollBy({ left: -100, behavior: 'smooth' });
+        scrollRight.onclick = () => scrollContainer.scrollBy({ left: 100, behavior: 'smooth' });
+    }
+
+    if (!fab) return;
+
+    fab.addEventListener('click', () => {
+        document.getElementById('modal-title').textContent = 'アイテム登録';
+        document.getElementById('edit-id').value = '';
+        document.getElementById('original-unit').value = '';
+        document.getElementById('input-name').value = '';
+        document.getElementById('input-kana').value = '';
+        document.getElementById('input-unit').value = '';
+        document.getElementById('input-csv-text').value = '';
+        
+        updateCategorySelect(currentCategory !== 'すべて' && currentCategory !== '未分類' ? currentCategory : '');
+
+        document.getElementById('csv-result-area').style.display = 'none';
+        
+        tabCsv.classList.remove('active');
+        tabSingle.classList.add('active');
+        singleContainer.style.display = 'block';
+        csvContainer.style.display = 'none';
+        
+        overlay.classList.add('active');
+    });
+
+    btnCancel.addEventListener('click', () => {
+        overlay.classList.remove('active');
+        removeConflictUI();
+    });
+    searchInput.addEventListener('input', () => {
+        filterAndRender();
+    });
+    tabSingle.addEventListener('click', () => {
+        tabSingle.classList.add('active');
+        tabCsv.classList.remove('active');
+        singleContainer.style.display = 'block';
+        csvContainer.style.display = 'none';
+        removeConflictUI();
+        document.getElementById('csv-result-area').style.display = 'none';
+    });
+    tabCsv.addEventListener('click', () => {
+        tabCsv.classList.add('active');
+        tabSingle.classList.remove('active');
+        singleContainer.style.display = 'none';
+        csvContainer.style.display = 'block';
+        removeConflictUI();
+    });
+    btnSave.addEventListener('click', () => {
+        if (singleContainer.style.display !== 'none') {
+            saveSingleItem();
+        } else {
+            saveCsvItem();
+        }
+    });
+}
+
+function removeConflictUI() {
+    const conflictDiv = document.getElementById('conflict-resolution-area');
+    if (conflictDiv) conflictDiv.remove();
+    const btnSave = document.getElementById('btn-save');
+    if (btnSave) {
+        btnSave.style.display = 'block';
+        btnSave.textContent = '保存';
+    }
+}
+
+function saveSingleItem() {
+    const id = document.getElementById('edit-id').value;
+    const name = document.getElementById('input-name').value;
+    const originalUnit = document.getElementById('original-unit').value;
+    const newUnit = document.getElementById('input-unit').value;
+
+    if (!name) return alert('名前を入力してください');
+
+    if (id && originalUnit !== newUnit) {
+        if (!confirm(`単位が「${originalUnit || '(なし)'}」から「${newUnit || '(なし)'}」に変更されています。\n在庫の数値（例: 3個 → 3${newUnit}）の意味が変わってしまいますが、よろしいですか？`)) {
+            return;
+        }
+    }
+
+    const item = {
+        id: id ? parseInt(id) : 0,
+        classification: document.getElementById('input-classification').value,
+        category: document.getElementById('input-category').value,
+        name: name,
+        kana: document.getElementById('input-kana').value,
+        default_unit: newUnit,
+        force_merge: false
+    };
+
+    let method = 'POST';
+    if (id) method = 'PUT';
+
+    fetch('/api/catalog', {
+        method: method,
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(id ? item : [item])
+    })
+    .then(async res => {
+        const data = await res.json();
+        
+        if (res.status === 409 && data.error_code === 'merge_confirmation_required') {
+            if (confirm(`${data.message}\n\n「OK」を押すとデータを統合します（元のデータは削除され、関連データは移動します）。`)) {
+                item.force_merge = true;
+                return fetch('/api/catalog', {
+                    method: 'PUT',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(item)
+                }).then(r => r.json());
+            } else {
+                throw new Error('キャンセルしました');
+            }
+        }
+
+        if (!res.ok) throw new Error(data.error || 'Save failed');
+        return data;
+    })
+    .then(() => {
+        document.getElementById('modal-overlay').classList.remove('active');
+        fetchCatalog();
+        alert('保存しました');
+    })
+    .catch(err => {
+        if (err.message !== 'キャンセルしました') alert('エラー: ' + err.message);
+    });
+}
+
+function saveCsvItem() {
+    const text = document.getElementById('input-csv-text').value;
+    const resultArea = document.getElementById('csv-result-area');
+    
+    if (!text) return alert('CSVを入力してください');
+
+    fetch('/import/catalog', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'text/plain'
+        },
+        body: text
+    })
+    .then(async res => {
+        if (!res.ok) {
+             const errorData = await res.json().catch(() => ({ error: `サーバーエラー: ${res.status}` }));
+             throw new Error(errorData.error || `サーバーエラー: ${res.status}`);
+        }
+        return res.json();
+    })
+    .then(result => {
+        resultArea.style.display = 'block';
+        resultArea.innerHTML = `
+            <h3>処理結果</h3>
+            <p>登録成功: <strong>${result.added}</strong> 件</p>
+            <p>重複スキップ: <strong>${result.skipped}</strong> 件</p>
+        `;
+
+        if (result.errors && result.errors.length > 0) {
+            resultArea.innerHTML += `
+                <div style="color: red; margin-top:10px; border: 1px solid red; padding: 5px; border-radius: 4px;">
+                    <h4>エラー詳細:</h4>
+                    <ul>${result.errors.map(e => `<li>${e}</li>`).join('')}</ul>
+                </div>
+            `;
+        }
+
+        fetchCatalog();
+        document.getElementById('input-csv-text').value = ''; 
+    })
+    .catch(err => alert('エラー: ' + err.message));
+}
+
+----- C:\Users\wasab\OneDrive\デスクトップ\kimichan2\static\js\inventory_locations.js -----
+let locations = []; 
+// グローバルから呼べるようにwindowに登録
+window.fetchLocations = function() {
+    return fetch('/api/locations')
+        .then(res => res.json())
+        .then(data => {
+            locations = data;
+            // 読み込み完了時にプルダウンを更新
+            renderLocationSelects(); 
+        })
+        .catch(err => console.error(err));
+};
+
+window.renderLocationSelects = function() {
+    const selects = [document.getElementById('inv-location'), document.getElementById('inv-edit-location')]; 
+    selects.forEach(sel => {
+        if (!sel) return;
+        const currentVal = sel.value;
+        sel.innerHTML = '';
+        locations.forEach(loc => {
+            const opt = document.createElement('option');
+            opt.value = loc.name;
+            opt.textContent = loc.name;
+            sel.appendChild(opt);
+  
+        }); 
+        if (currentVal && locations.some(l => l.name === currentVal)) {
+            sel.value = currentVal;
+        } else if (locations.length > 0) {
+            const other = locations.find(l => l.name === 'その他');
+            sel.value = other ? other.name : locations[0].name;
+        }
+    });
+};
+
+window.setupLocationUI = function() {
+    const btnManageLoc = document.getElementById('btn-manage-loc');
+    const btnLocClose = document.getElementById('btn-loc-close');
+    const btnAddLoc = document.getElementById('btn-add-loc'); 
+    const locManageOverlay = document.getElementById('modal-loc-manage');
+
+    if(btnManageLoc) {
+        btnManageLoc.addEventListener('click', () => {
+            renderLocationManageList(); 
+            locManageOverlay.classList.add('active');
+        });
+    }
+    if(btnLocClose) {
+        btnLocClose.addEventListener('click', () => {
+            locManageOverlay.classList.remove('active');
+            renderLocationSelects(); 
+            // 在庫リスト再描画（グローバル関数を呼ぶ）
+            if(typeof fetchInventory === 'function') fetchInventory();
+        });
+    }
+    if(btnAddLoc) {
+        btnAddLoc.addEventListener('click', () => {
+            const name = document.getElementById('new-loc-name').value;
+            if(!name) return;
+            fetch('/api/locations', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+        
+                body: JSON.stringify({name: name}) 
+            })
+            .then(res => res.json())
+            .then(() => {
+                document.getElementById('new-loc-name').value = '';
+                window.fetchLocations().then(renderLocationManageList); 
+            });
+    
+        });
+    }
+};
+
+function renderLocationManageList() {
+    const ul = document.getElementById('loc-manage-list');
+    ul.innerHTML = ''; 
+    locations.forEach((loc, index) => {
+        const li = document.createElement('li');
+        li.className = 'location-manage-item';
+        li.innerHTML = `
+            <span>${loc.name}</span>
+            <div class="loc-actions">
+                ${index > 0 ? `<button onclick="moveLocation(${loc.id}, -1)">↑</button>` : ''}
+                ${index 
+< locations.length - 1 ? `<button onclick="moveLocation(${loc.id}, 1)">↓</button>` : ''} 
+                <button onclick="deleteLocation(${loc.id})" style="color:red;">×</button>
+            </div>
+        `;
+        ul.appendChild(li); 
+    });
+}
+
+window.moveLocation = function(id, direction) {
+    const idx = locations.findIndex(l => l.id === id); 
+    if (idx < 0) return;
+    const newIdx = idx + direction;
+    if (newIdx < 0 || newIdx >= locations.length) return; 
+    const temp = locations[idx];
+    locations[idx] = locations[newIdx];
+    locations[newIdx] = temp; 
+    fetch('/api/locations', {
+        method: 'PUT',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(locations) 
+    }).then(() => {
+        window.fetchLocations().then(renderLocationManageList); 
+    });
+};
+
+window.deleteLocation = function(id) {
+    if(!confirm('削除しますか？')) return; 
+    fetch(`/api/locations?id=${id}`, { method: 'DELETE' }) 
+    .then(() => {
+        window.fetchLocations().then(renderLocationManageList); 
+    });
+};
+
+----- C:\Users\wasab\OneDrive\デスクトップ\kimichan2\static\js\inventory_photos.js -----
+let fridgePhotos = [];
+let uploadTargetLocation = 'その他';
+
+window.fetchFridgePhotos = function() {
+    return fetch('/api/fridge_photos')
+        .then(res => res.json())
+        .then(data => {
+            fridgePhotos = data;
+        })
+        .catch(err => console.error(err));
+};
+
+window.renderLocationPhotos = function(locationName) {
+    const photos = fridgePhotos.filter(p => {
+        const pLoc = p.location || 'その他';
+        return pLoc === locationName;
+    });
+
+    const container = document.createElement('div');
+    container.className = 'fridge-snapshot-area';
+
+    // 撮るボタン
+    const addBtn = document.createElement('div');
+    addBtn.className = 'btn-add-snapshot';
+    addBtn.innerHTML = '<span style="font-size:20px;">📷</span><br>撮る';
+    addBtn.onclick = () => {
+        uploadTargetLocation = locationName;
+        const fileInput = document.getElementById('snapshot-file');
+        fileInput.value = ''; 
+        fileInput.click();
+    };
+    container.appendChild(addBtn);
+
+    // 写真リスト
+    photos.forEach(photo => {
+        const div = document.createElement('div');
+        div.className = 'snapshot-card';
+        
+        const img = document.createElement('img');
+        img.src = `/images/${photo.image_path}`;
+        img.className = 'snapshot-img';
+        img.onclick = () => openPhotoView(photo.image_path);
+        
+        const delBtn = document.createElement('button');
+        delBtn.className = 'btn-delete-snapshot';
+        delBtn.textContent = '×';
+        delBtn.onclick = (e) => deleteFridgePhoto(photo.id, e);
+
+        div.appendChild(img);
+        div.appendChild(delBtn);
+        container.appendChild(div);
+    });
+
+    return container;
+};
+
+function openPhotoView(path) {
+    const modal = document.getElementById('modal-photo-view');
+    const img = document.getElementById('photo-view-img');
+    img.src = `/images/${path}`;
+    modal.classList.add('active');
+}
+
+window.deleteFridgePhoto = function(id, e) {
+    e.stopPropagation();
+    if (!confirm('この写真を削除しますか？')) return;
+    fetch(`/api/fridge_photos?id=${id}`, { method: 'DELETE' })
+    .then(() => {
+        // 再取得と再描画は inventory.js 側で制御するため、イベント発行またはデータ更新のみ
+        return window.fetchFridgePhotos();
+    })
+    .then(() => {
+        if (typeof renderInventory === 'function') {
+             // インベントリ全体を再描画して写真も更新
+             renderInventory(inventoryData);
+        }
+    });
+};
+
+window.setupPhotoUI = function() {
+    const snapshotFile = document.getElementById('snapshot-file');
+    const btnPhotoClose = document.getElementById('btn-photo-close');
+    const photoViewOverlay = document.getElementById('modal-photo-view');
+
+    if (snapshotFile) {
+        snapshotFile.addEventListener('change', () => {
+            const file = snapshotFile.files[0];
+            if (!file) return;
+            const formData = new FormData();
+            formData.append('photo', file);
+            fetch('/api/upload', { method: 'POST', body: formData })
+            .then(res => res.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    return fetch('/api/fridge_photos', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({ 
+                            image_path: data.filename,
+                            location: uploadTargetLocation
+                        })
+                    });
+                }
+            })
+            .then(() => window.fetchFridgePhotos())
+            .then(() => {
+                if (typeof renderInventory === 'function') {
+                     renderInventory(inventoryData);
+                }
+            })
+            .catch(err => alert('アップロード失敗'));
+        });
+    }
+
+    if(btnPhotoClose) {
+        btnPhotoClose.addEventListener('click', () => photoViewOverlay.classList.remove('active'));
+        photoViewOverlay.addEventListener('click', () => photoViewOverlay.classList.remove('active'));
+    }
+    
+    // 各モーダル内の画像アップロード設定 (ここは変更なし)
+    setupImageUpload('inv-file', 'inv-preview', 'inv-image-path');
+    setupImageUpload('inv-edit-file', 'inv-edit-preview', 'inv-edit-image-path');
+};
+
+function setupImageUpload(inputId, previewId, pathInputId) {
+    const input = document.getElementById(inputId);
+    const preview = document.getElementById(previewId);
+    const pathInput = document.getElementById(pathInputId);
+
+    if(!input) return;
+
+    input.addEventListener('change', () => {
+        const file = input.files[0];
+        if (!file) return;
+
+        const formData = new FormData();
+        formData.append('photo', file);
+
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            preview.src = e.target.result;
+            preview.classList.add('active');
+        };
+        reader.readAsDataURL(file);
+
+        fetch('/api/upload', {
+            method: 'POST',
+            body: formData
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.status === 'success') {
+                pathInput.value = data.filename;
+            } else {
+                alert('画像のアップロードに失敗しました');
+            }
+        })
+        .catch(err => {
+            console.error(err);
+            alert('通信エラー');
+        });
+    });
+}
+
+----- C:\Users\wasab\OneDrive\デスクトップ\kimichan2\static\js\inventory.js -----
+let inventoryData = [];
+let catalogListForInv = [];
+
+function initInventory() {
+    if (window.fetchLocations) window.fetchLocations();
+    
+    // 写真と在庫の両方を取得し終えてから描画しないと、写真エリアに既存写真が表示されない可能性があるため
+    // Promise.all で並列取得待ち合わせを行う形に修正推奨ですが、
+    // まずは「ボタンが表示されない」不具合を解消するため、呼び出し順序は維持しつつ描画ロジックを修正します。
+    if (window.fetchFridgePhotos) window.fetchFridgePhotos();
+
+    // 初回: 在庫取得 -> カタログ取得(フィルタリング) の順で実行
+    window.fetchInventory().then(fetchCatalogForInv);
+    
+    setupInventoryUI();
+    if (window.setupLocationUI) window.setupLocationUI();
+    if (window.setupPhotoUI) window.setupPhotoUI();
+}
+
+window.fetchInventory = function() {
+    return fetch('/api/ingredients')
+        .then(res => res.json())
+        .then(data => {
+            inventoryData = data;
+            renderInventory(inventoryData);
+        })
+        .catch(err => console.error(err));
+};
+
+function fetchCatalogForInv() {
+    fetch('/api/catalog')
+        .then(res => res.json())
+        .then(data => {
+            // 1. 在庫に含まれる catalog_id のセットを作成
+            const inventoryCatalogIds = new Set(
+                inventoryData.map(item => item.catalog_id)
+            );
+
+            // 2. 調味料を除外し、かつ在庫にないものをフィルタリング
+            let filteredData = data.filter(item => {
+                const isSeasoning = item.classification === '調味料';
+                const isInInventory = inventoryCatalogIds.has(item.id);
+                return !isSeasoning && !isInInventory;
+            });
+
+            // 3. ソート (分類 -> カテゴリ -> 名前/よみがな)
+            filteredData.sort((a, b) => {
+                const compare = (keyA, keyB) => keyA.localeCompare(keyB, 'ja');
+                let result = compare(a.classification || '', b.classification || '');
+                if (result !== 0) return result;
+                result = compare(a.category || '', b.category || '');
+                if (result !== 0) return result;
+                const ka = a.kana || a.name;
+                const kb = b.kana || b.name;
+                return compare(ka, kb);
+            });
+            
+            catalogListForInv = filteredData;
+            updateCatalogSelect();
+        });
+}
+
+function updateCatalogSelect() {
+    const select = document.getElementById('inv-select-catalog');
+    if (!select) return;
+    select.innerHTML = '<option value="">カタログから選択...</option>';
+    catalogListForInv.forEach(item => {
+        const opt = document.createElement('option');
+        const classification = item.classification || '分類なし';
+        const category = item.category || 'カテゴリなし';
+        const kana = item.kana ? ` (${item.kana})` : '';
+
+        // 表示形式: 分類 / カテゴリ - 名前 (よみがな)
+        opt.value = item.id;
+        opt.textContent = `${classification} / ${category} - ${item.name}${kana}`;
+        opt.dataset.unit = item.default_unit;
+        select.appendChild(opt);
+    });
+}
+
+function renderInventory(items) {
+    const listEl = document.getElementById('inventory-list');
+    if (!listEl) return;
+    listEl.innerHTML = '';
+    let currentLocation = null;
+    items.forEach(item => {
+        if (item.location !== currentLocation) {
+            currentLocation = item.location;
+            const header = document.createElement('div');
+            header.className = 'loc-header-badge';
+            header.textContent = currentLocation || 'その他';
+            if (listEl.children.length > 0) header.style.marginTop = '15px';
+         
+            listEl.appendChild(header);
+
+            // ★追加修正: ここに写真エリアを挿入する処理が抜けていました 
+            if (window.renderLocationPhotos) {
+                // その場所用の写真ストリップを生成して追加
+                const photoStrip = window.renderLocationPhotos(currentLocation || 'その他');
+                listEl.appendChild(photoStrip);
+            }
+        }
+
+        const div = document.createElement('div');
+        div.className = 'card';
+        div.onclick = (e) => {
+            if (!e.target.classList.contains('recipe-badge')) {
+                openInventoryEdit(item);
+            }
+        };
+      
+        let badgeHtml = '';
+        if (item.recipe_count > 0) {
+            badgeHtml = `
+            <span class="recipe-badge" onclick="goToFilteredRecipes(${item.catalog_id}, '${item.name}')" 
+                  style="background:#e67e22; color:white; padding:4px 10px; border-radius:20px; font-size:11px; font-weight:bold;
+margin-left:10px; cursor:pointer;">
+                🍳 ${item.recipe_count}
+            </span>`;
+        }
+
+        let thumbHtml = '';
+        if (item.image_path) {
+            thumbHtml = `<img src="/images/${item.image_path}" class="list-thumbnail">`;
+        }
+
+        let amountDisplay = '';
+      
+        if (item.amount === -1) {
+            amountDisplay = '<span style="color:#27ae60;ont-weight:bold;">在庫あり</span>';
+        } else {
+            amountDisplay = `${item.amount} ${item.unit}`;
+        }
+
+        div.innerHTML = `
+            <div style="display:flex;
+align-items:center;">
+                ${thumbHtml}
+                <div class="card-content" style="flex:1;">
+                    <div style="display:flex;
+align-items:center;">
+                        <span class="tag">期限: ${item.expiration_date.split('T')[0]}</span>
+                    </div>
+                    <div style="display:flex;
+align-items:center; margin-top:4px;">
+                        <span class="item-name">${item.name}</span>
+                        ${badgeHtml}
+                    </div>
+                </div>
+            </div>
+  
+           <div class="item-unit">${amountDisplay}</div>
+        `;
+        listEl.appendChild(div);
+    });
+}
+
+window.goToFilteredRecipes = function(catalogId, itemName) {
+    sessionStorage.setItem('recipe_filter_id', catalogId);
+    sessionStorage.setItem('recipe_filter_name', itemName);
+    const recipeTab = document.querySelector('a[data-view="recipes"]');
+    if(recipeTab) recipeTab.click();
+};
+
+function openInventoryEdit(item) {
+    const overlay = document.getElementById('modal-inv-edit');
+    document.getElementById('inv-edit-title').textContent = item.name + ' の管理';
+    document.getElementById('inv-edit-id').value = item.id;
+    document.getElementById('inv-edit-amount').value = item.amount;
+    document.getElementById('inv-edit-unit').textContent = item.unit;
+    document.getElementById('inv-edit-date').value = item.expiration_date.split('T')[0];
+
+    const locSelect = document.getElementById('inv-edit-location');
+    if(item.location) {
+        locSelect.value = item.location;
+    }
+    overlay.classList.add('active');
+}
+
+window.addAmount = function(val) {
+    const input = document.getElementById('inv-amount');
+    let current = parseFloat(input.value) || 0;
+    let nextVal = current + val;
+    
+    if (nextVal < 0) nextVal = 0;
+    
+    input.value = Math.round(nextVal * 10) / 10;
+};
+
+function setupInventoryUI() {
+    const fab = document.getElementById('fab-add-inventory');
+    const overlay = document.getElementById('modal-inventory');
+    const editOverlay = document.getElementById('modal-inv-edit');
+    const btnCancel = document.getElementById('btn-inv-cancel');
+    const btnSave = document.getElementById('btn-inv-save');
+    const btnEditCancel = document.getElementById('btn-inv-edit-cancel');
+    const btnUpdate = document.getElementById('btn-inv-update');
+    const btnDelete = document.getElementById('btn-inv-delete');
+    const select = document.getElementById('inv-select-catalog');
+    const unitInput = document.getElementById('inv-unit');
+
+    // 詳細スイッチ制御
+    const detailToggle = document.getElementById('inv-detail-toggle');
+    const detailArea = document.getElementById('inv-detail-area');
+    if (detailToggle) {
+        detailToggle.addEventListener('change', (e) => {
+            if (e.target.checked) {
+                detailArea.style.display = 'block';
+            } else {
+                detailArea.style.display = 'none';
+            }
+       
+        });
+    }
+
+    if (!fab) return;
+
+    fab.addEventListener('click', () => {
+        document.getElementById('inv-detail-toggle').checked = false;
+        document.getElementById('inv-detail-area').style.display = 'none';
+        document.getElementById('inv-amount').value = 1; 
+        
+        overlay.classList.add('active');
+    });
+    btnCancel.addEventListener('click', () => overlay.classList.remove('active'));
+    btnEditCancel.addEventListener('click', (e) => {
+        e.preventDefault();
+        editOverlay.classList.remove('active');
+    });
+    select.addEventListener('change', () => {
+        const selected = select.options[select.selectedIndex];
+        const u = selected.dataset.unit || '';
+        unitInput.value = u;
+    });
+
+    // 保存処理
+    btnSave.addEventListener('click', () => {
+        const catalogId = parseInt(select.value);
+        const location = document.getElementById('inv-location').value;
+
+        let amount = -1;
+        let date = "";
+        
+        if (document.getElementById('inv-detail-toggle').checked) {
+            amount = parseFloat(document.getElementById('inv-amount').value);
+            if (isNaN(amount)) amount = 1; 
+            date = document.getElementById('inv-date').value;
+        }
+
+        let expirationDate = "";
+        if (date) {
+            expirationDate = date + "T00:00:00Z";
+        }
+
+        if (!catalogId) return alert('食材を選んでください');
+
+        const data = {
+            catalog_id: catalogId,
+            amount: amount,
+            unit: unitInput.value,
+            expiration_date: expirationDate,
+            location: location
+        };
+
+        fetch('/api/ingredients', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(data)
+        })
+        .then(res => {
+            if (!res.ok) throw new Error('Failed');
+            overlay.classList.remove('active');
+            
+            // 在庫更新後にプルダウンも更新
+            window.fetchInventory().then(() => fetchCatalogForInv());
+        })
+        .catch(err => alert('エラー: ' + err));
+    });
+
+    // 更新処理
+    btnUpdate.addEventListener('click', () => {
+        const id = document.getElementById('inv-edit-id').value;
+        const amount = parseFloat(document.getElementById('inv-edit-amount').value);
+        const date = document.getElementById('inv-edit-date').value;
+        const location = document.getElementById('inv-edit-location').value;
+
+        if (isNaN(amount)) return alert('数量を入力してください');
+
+        let expirationDate = "";
+        if (date) {
+            expirationDate = date.includes('T') ? date : date + "T00:00:00Z";
+        }
+
+        const data = {
+            id: parseInt(id),
+            amount: amount,
+            expiration_date: expirationDate,
+            location: location
+        };
+
+        fetch('/api/ingredients', {
+            method: 'PUT',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(data)
+        })
+        .then(res => {
+            if (!res.ok) throw new Error('Update failed');
+            editOverlay.classList.remove('active');
+
+            // 在庫更新後にプルダウンも更新
+            window.fetchInventory().then(() => fetchCatalogForInv());
+        })
+        .catch(err => alert('更新エラー: ' + err));
+    });
+
+    // 削除処理
+    btnDelete.addEventListener('click', () => {
+        if (!confirm('本当に削除しますか？（使い切ったことになります）')) return;
+        const id = document.getElementById('inv-edit-id').value;
+        fetch(`/api/ingredients?id=${id}`, { method: 'DELETE' })
+        .then(res => {
+            if (!res.ok) throw new Error('Delete failed');
+            editOverlay.classList.remove('active');
+
+            // 在庫更新後にプルダウンも更新
+            window.fetchInventory().then(() => fetchCatalogForInv());
+        })
+        .catch(err => alert('削除エラー: ' + err));
+    });
+}
+
+----- C:\Users\wasab\OneDrive\デスクトップ\kimichan2\static\js\recipe_edit.js -----
+// --- 編集画面 ---
+
+function openRecipeEditModal() {
+    // 詳細画面を閉じる
+    document.getElementById('modal-recipe-detail').classList.remove('active');
+    
+    // タイトル変更
+    document.getElementById('modal-recipe-title').textContent = 'レシピ編集';
+    
+    // 既存データをフォームにセット
+    document.getElementById('rec-id').value = currentRecipeDetail.id;
+    document.getElementById('rec-name').value = currentRecipeDetail.name;
+    document.getElementById('rec-yield').value = currentRecipeDetail.yield || '';
+    document.getElementById('rec-url').value = currentRecipeDetail.url;
+    document.getElementById('rec-process').value = currentRecipeDetail.process;
+
+    // 材料リストをCSVテキストに変換してセット
+    let csvText = "";
+    if (currentIngredients && currentIngredients.length > 0) {
+        csvText = currentIngredients.map(ing => {
+            // 形式: 名前,分量,単位
+            return `${ing.name},${ing.amount},${ing.unit}`;
+        }).join('\n');
+    }
+    document.getElementById('rec-csv').value = csvText;
+
+    // 登録モーダルを開く
+    document.getElementById('modal-recipe').classList.add('active');
+}
+
+// --- UIイベント設定 ---
+
+function setupRecipeUI() {
+    const fab = document.getElementById('fab-add-recipe');
+    const overlay = document.getElementById('modal-recipe');
+    const detailOverlay = document.getElementById('modal-recipe-detail');
+    const missingOverlay = document.getElementById('modal-missing-ing');
+
+    const btnCancel = document.getElementById('btn-rec-cancel');
+    const btnSave = document.getElementById('btn-rec-save');
+    const btnDetailClose = document.getElementById('btn-detail-close');
+    const btnDetailEdit = document.getElementById('btn-detail-edit');
+    
+    const btnMissingCancel = document.getElementById('btn-missing-cancel');
+    const btnMissingRegister = document.getElementById('btn-missing-register');
+
+    if (!fab) return;
+
+    // 新規登録ボタン
+    fab.addEventListener('click', () => {
+        document.getElementById('modal-recipe-title').textContent = 'レシピ登録';
+        document.getElementById('rec-id').value = ''; 
+        document.getElementById('rec-name').value = '';
+        document.getElementById('rec-yield').value = '';
+        document.getElementById('rec-url').value = '';
+        document.getElementById('rec-process').value = '';
+        document.getElementById('rec-csv').value = '';
+        overlay.classList.add('active');
+    });
+    
+    // キャンセル・閉じる
+    btnCancel.addEventListener('click', () => overlay.classList.remove('active'));
+    btnDetailClose.addEventListener('click', () => detailOverlay.classList.remove('active'));
+    
+    // 編集ボタン
+    btnDetailEdit.addEventListener('click', () => openRecipeEditModal());
+
+    // 保存実行
+    btnSave.addEventListener('click', () => saveRecipe());
+
+    // 不足食材モーダル
+    btnMissingCancel.addEventListener('click', () => missingOverlay.classList.remove('active'));
+    btnMissingRegister.addEventListener('click', () => registerMissingItemsAndRetry());
+}
+
+// --- 保存処理 ---
+
+function saveRecipe() {
+    const id = document.getElementById('rec-id').value;
+    const name = document.getElementById('rec-name').value;
+    const yieldVal = document.getElementById('rec-yield').value;
+    const url = document.getElementById('rec-url').value;
+    const process = document.getElementById('rec-process').value;
+    const csvData = document.getElementById('rec-csv').value;
+
+    if (!name) return alert('レシピ名は必須です');
+    if (!csvData) return alert('材料CSVを入力してください');
+
+    const payload = {
+        name: name,
+        yield: yieldVal,
+        url: url,
+        process: process,
+        csv_data: csvData
+    };
+
+    let method = 'POST';
+    let endpoint = '/api/recipes';
+    if (id) {
+        method = 'PUT';
+        endpoint = `/api/recipes?id=${id}`;
+    }
+
+    fetch(endpoint, {
+        method: method,
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload)
+    })
+    .then(async res => {
+        const data = await res.json();
+        
+        // エラーハンドリング: 不足食材がある場合
+        if (!res.ok && data.error_code === 'missing_ingredients') {
+            showMissingIngredientsModal(data.items);
+            throw new Error('missing_ingredients');
+        }
+
+        if (!res.ok) throw new Error(data.error || '登録エラー');
+        return data;
+    })
+    .then(() => {
+        alert(id ? 'レシピを更新しました！' : 'レシピを登録しました！');
+        document.getElementById('modal-recipe').classList.remove('active');
+        fetchRecipes();
+    })
+    .catch(err => {
+        if (err.message !== 'missing_ingredients') {
+            alert(err.message);
+        }
+    });
+}
+
+// --- 不足食材のクイック登録 ---
+
+function showMissingIngredientsModal(items) {
+    const overlay = document.getElementById('modal-missing-ing');
+    const listArea = document.getElementById('missing-list-area');
+    listArea.innerHTML = '';
+
+    items.forEach((name, index) => {
+        const div = document.createElement('div');
+        div.className = 'form-group';
+        div.style.background = '#f9f9f9';
+        div.style.padding = '10px';
+        div.style.borderRadius = '8px';
+        
+        div.innerHTML = `
+            <div style="font-weight:bold; margin-bottom:5px;">${name}</div>
+            <div style="display:flex; gap:10px;">
+                <select id="missing-class-${index}" class="input-field" style="padding:8px; font-size:12px;">
+                    <option value="食材">食材</option>
+                    <option value="調味料">調味料</option>
+                </select>
+                <input type="hidden" id="missing-name-${index}" value="${name}">
+            </div>
+        `;
+        listArea.appendChild(div);
+    });
+
+    overlay.classList.add('active');
+}
+
+function registerMissingItemsAndRetry() {
+    const listArea = document.getElementById('missing-list-area');
+    const itemsToRegister = [];
+    
+    const divs = listArea.querySelectorAll('.form-group');
+    divs.forEach((div, index) => {
+        const name = document.getElementById(`missing-name-${index}`).value;
+        const cls = document.getElementById(`missing-class-${index}`).value;
+        
+        itemsToRegister.push({
+            name: name,
+            classification: cls,
+            category: cls === '調味料' ? '' : 'その他',
+            default_unit: cls === '調味料' ? '' : '個'
+        });
+    });
+
+    // カタログへの一括登録
+    fetch('/api/catalog', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(itemsToRegister)
+    })
+    .then(res => {
+        if (!res.ok) throw new Error('カタログ登録に失敗しました');
+        return res.json();
+    })
+    .then(() => {
+        // 成功したらモーダルを閉じて、レシピ保存を再試行
+        document.getElementById('modal-missing-ing').classList.remove('active');
+        saveRecipe(); 
+    })
+    .catch(err => alert(err.message));
+}
+
+----- C:\Users\wasab\OneDrive\デスクトップ\kimichan2\static\js\recipe_list.js -----
+// グローバル変数（edit.jsでも使用）
+let recipeData = [];
+let currentRecipeDetail = null;
+let currentIngredients = [];
+
+// --- 初期化とデータ取得 ---
+
+function initRecipes() {
+    // フィルタ情報（冷蔵庫からの遷移など）があるか確認
+    const filterId = sessionStorage.getItem('recipe_filter_id');
+    const filterName = sessionStorage.getItem('recipe_filter_name');
+    
+    if (filterId) {
+        fetchFilteredRecipes(filterId, filterName);
+    } else {
+        fetchRecipes();
+    }
+    
+    // 編集機能のセットアップ（recipe_edit.jsの関数）
+    if (typeof setupRecipeUI === 'function') {
+        setupRecipeUI();
+    }
+}
+
+function fetchRecipes() {
+    showFilterHeader(null); // フィルタ表示をクリア
+    fetch('/api/recipes')
+        .then(res => res.json())
+        .then(data => {
+            recipeData = data;
+            renderRecipes(recipeData);
+        })
+        .catch(err => console.error(err));
+}
+
+function fetchFilteredRecipes(catalogId, itemName) {
+    showFilterHeader(itemName); // 「〇〇のレシピ」ヘッダー表示
+    fetch(`/api/recipes?ingredient_id=${catalogId}`)
+        .then(res => res.json())
+        .then(data => {
+            recipeData = data;
+            renderRecipes(recipeData);
+        })
+        .catch(err => console.error(err));
+}
+
+// フィルタ解除バーの表示
+function showFilterHeader(itemName) {
+    const listEl = document.getElementById('recipe-list');
+    const existing = document.getElementById('filter-status-bar');
+    if (existing) existing.remove();
+
+    if (!itemName) return;
+
+    const bar = document.createElement('div');
+    bar.id = 'filter-status-bar';
+    bar.style.cssText = 'background:#fff3e0; padding:10px 15px; margin-bottom:15px; border-radius:8px; display:flex; justify-content:space-between; align-items:center; color:#e67e22; font-weight:bold; font-size:14px;';
+    bar.innerHTML = `
+        <span>🔍 ${itemName} のレシピ</span>
+        <button id="btn-clear-filter" style="background:#ddd; border:none; padding:5px 10px; border-radius:15px; font-size:12px; cursor:pointer;">解除</button>
+    `;
+    listEl.parentNode.insertBefore(bar, listEl);
+
+    document.getElementById('btn-clear-filter').addEventListener('click', () => {
+        sessionStorage.removeItem('recipe_filter_id');
+        sessionStorage.removeItem('recipe_filter_name');
+        fetchRecipes(); // 全件再取得
+    });
+}
+
+// --- リスト描画 ---
+
+function renderRecipes(items) {
+    const listEl = document.getElementById('recipe-list');
+    if (!listEl) return;
+    listEl.innerHTML = '';
+
+    if (items.length === 0) {
+        listEl.innerHTML = '<p style="text-align:center; color:#999; margin-top:20px;">レシピが見つかりません</p>';
+        return;
+    }
+
+    items.forEach(item => {
+        const div = document.createElement('div');
+        div.className = 'card';
+        div.onclick = () => openRecipeDetail(item);
+        
+        // 在庫状況アイコン (クラスを使って視認性を制御)
+        const ingIcon = item.has_ingredients ? '<span class="icon-strong">🥦</span>' : '<span class="icon-faint">🥦</span>';
+        const seasIcon = item.has_seasonings ? '<span class="icon-strong">🧂</span>' : '<span class="icon-faint">🧂</span>';
+
+        div.innerHTML = `
+            <div class="card-content">
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <span class="item-name">${item.name}</span>
+                    <span>${ingIcon} ${seasIcon}</span>
+                </div>
+                <div style="font-size:11px; color:#666;">${item.yield || ''}</div>
+            </div>
+            <div style="font-size:20px; color:#ccc;">›</div>
+        `;
+        listEl.appendChild(div);
+    });
+}
+
+// --- 詳細画面表示 ---
+
+function openRecipeDetail(recipe) {
+    currentRecipeDetail = recipe;
+    
+    const modal = document.getElementById('modal-recipe-detail');
+    const title = document.getElementById('detail-title');
+    const yieldDisplay = document.getElementById('detail-yield');
+    const link = document.getElementById('detail-link');
+    const process = document.getElementById('detail-process');
+    const ingArea = document.getElementById('detail-ingredients');
+    const missingAlert = document.getElementById('detail-missing-alert');
+    
+    title.textContent = recipe.name;
+    yieldDisplay.textContent = recipe.yield ? `(${recipe.yield})` : '';
+    process.textContent = recipe.process || '（作り方の登録なし）';
+    
+    if (recipe.url) {
+        link.style.display = 'inline-block';
+        link.href = recipe.url;
+    } else {
+        link.style.display = 'none';
+    }
+
+    ingArea.innerHTML = '<div style="text-align:center; color:#999;">読み込み中...</div>';
+    if (missingAlert) missingAlert.style.display = 'none';
+
+    // 材料APIを叩いて詳細情報を取得
+    fetch(`/api/recipes/ingredients?id=${recipe.id}`)
+        .then(res => res.json())
+        .then(ingredients => {
+            currentIngredients = ingredients || [];
+
+            if (!ingredients || ingredients.length === 0) {
+                ingArea.innerHTML = '<div style="color:#999;">材料登録なし</div>';
+                return;
+            }
+
+            let html = '<ul style="list-style:none; padding:0;">';
+            let missingItems = [];
+            let currentGroup = "";
+
+            ingredients.forEach(ing => {
+                // 在庫チェック
+                const statusIcon = ing.in_stock ? '✅' : '❌';
+                const statusClass = ing.in_stock ? 'ing-status-ok' : 'ing-status-missing';
+                
+                if (!ing.in_stock) {
+                    missingItems.push(ing.name);
+                }
+
+                // グループ見出しの挿入 (＝ソース＝ など)
+                if (ing.group_name && ing.group_name !== currentGroup) {
+                    currentGroup = ing.group_name;
+                    html += `<li class="recipe-group-header">${currentGroup}</li>`;
+                } else if (!ing.group_name && currentGroup !== "") {
+                    currentGroup = ""; // グループ終了
+                }
+
+                html += `
+                <li style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px dashed #eee; padding:8px 0;">
+                    <span class="${statusClass}">
+                        ${statusIcon} ${ing.name}
+                    </span>
+                    <span style="font-weight:bold; font-size:13px;">${ing.amount}${ing.unit}</span>
+                </li>`;
+            });
+            html += '</ul>';
+            ingArea.innerHTML = html;
+
+            // 足りないものリストを表示
+            if (missingItems.length > 0 && missingAlert) {
+                missingAlert.style.display = 'block';
+                missingAlert.innerHTML = `
+                    <strong>⚠️ 足りないもの (${missingItems.length})</strong><br>
+                    ${missingItems.join('、')}
+                `;
+            }
+        })
+        .catch(err => {
+            console.error(err);
+            ingArea.innerHTML = '<div style="color:red;">読み込みエラー</div>';
+        });
+
+    modal.classList.add('active');
+}
+
+----- C:\Users\wasab\OneDrive\デスクトップ\kimichan2\static\js\seasoning_fetch.js -----
+let seasoningData = [];
+let catalogListForSeas = [];
+
+function initSeasoning() {
+    // 初回: 在庫取得 -> カタログ取得(フィルタリング) の順で実行
+    window.fetchSeasoning().then(() => window.fetchCatalogForSeas());
+    
+    if (typeof setupSeasoningUI === 'function') {
+        setupSeasoningUI();
+    }
+}
+
+window.fetchSeasoning = function() {
+    return fetch('/api/seasonings')
+        .then(res => res.json())
+        .then(data => {
+            seasoningData = data;
+            if (typeof renderSeasoning === 'function') {
+                renderSeasoning(seasoningData);
+            }
+        })
+        .catch(err => console.error(err));
+};
+
+// グローバルから呼べるようにwindowに登録
+window.fetchCatalogForSeas = function() {
+    return fetch('/api/catalog')
+        .then(res => res.json())
+        .then(data => {
+            // 1. 在庫に含まれる catalog_id のセットを作成
+            const inventoryCatalogIds = new Set(
+                seasoningData.map(item => item.catalog_id)
+            );
+            
+            // 2. 調味料であり、かつ在庫にないものをフィルタリング
+            let filteredData = data.filter(item => {
+                const isSeasoning = item.classification === '調味料';
+                const isInInventory = inventoryCatalogIds.has(item.id);
+                return isSeasoning && !isInInventory;
+            });
+
+            // 3. 分類 -> カテゴリ -> 名前/よみがな 順でソート
+            filteredData.sort((a, b) => {
+                const compare = (keyA, keyB) => keyA.localeCompare(keyB, 'ja');
+
+                let result = compare(a.classification || '', b.classification || '');
+                if (result !== 0) return result;
+
+                result = compare(a.category || '', b.category || '');
+                if (result !== 0) return result;
+
+                const ka = a.kana || a.name;
+                const kb = b.kana || b.name;
+                return compare(ka, kb);
+            });
+            
+            catalogListForSeas = filteredData;
+            
+            // UI側のプルダウン更新関数を呼び出し
+            if (typeof updateSeasSelect === 'function') {
+                updateSeasSelect();
+            }
+        });
+};
+
+----- C:\Users\wasab\OneDrive\デスクトップ\kimichan2\static\js\seasoning_ui.js -----
+function updateSeasSelect() {
+    const select = document.getElementById('seas-select-catalog');
+    if (!select) return;
+    
+    select.innerHTML = '<option value="">カタログから選択...</option>';
+    catalogListForSeas.forEach(item => {
+        const opt = document.createElement('option');
+        const classification = item.classification || '分類なし';
+        const category = item.category || 'カテゴリなし';
+        const kana = item.kana ? ` (${item.kana})` : '';
+        
+        // 表示形式: 分類 / カテゴリ - 名前 (よみがな)
+        opt.value = item.id;
+        opt.textContent = `${classification} / ${category} - ${item.name}${kana}`;
+        select.appendChild(opt);
+    });
+}
+
+function renderSeasoning(items) {
+    const listEl = document.getElementById('seasoning-list');
+    if (!listEl) return;
+    listEl.innerHTML = '';
+    items.forEach(item => {
+        const div = document.createElement('div');
+        div.className = 'card';
+        div.onclick = () => openSeasoningEdit(item);
+        
+        let statusColor = '#2ecc71'; // 緑
+        if (item.status === '少なめ') statusColor = '#f1c40f';
+        if (item.status === 'なし') statusColor = '#e74c3c';
+
+        div.innerHTML = `
+            <div class="card-content">
+                <span class="item-name">${item.name}</span>
+            </div>
+            <div class="item-unit" style="font-weight:bold; color:${statusColor};">
+                ${item.status}
+            </div>
+        `;
+        listEl.appendChild(div);
+    });
+}
+
+function openSeasoningEdit(item) {
+    const overlay = document.getElementById('modal-seasoning-edit');
+    document.getElementById('seas-edit-title').textContent = item.name;
+    document.getElementById('seas-edit-id').value = item.id;
+    overlay.classList.add('active');
+}
+
+function setupSeasoningUI() {
+    const fab = document.getElementById('fab-add-seasoning');
+    const overlay = document.getElementById('modal-seasoning');
+    const editOverlay = document.getElementById('modal-seasoning-edit');
+    const btnCancel = document.getElementById('btn-seas-cancel');
+    const btnSave = document.getElementById('btn-seas-save');
+    const select = document.getElementById('seas-select-catalog');
+
+    const btnEditCancel = document.getElementById('btn-seas-edit-cancel');
+    const btnDelete = document.getElementById('btn-seas-delete');
+    if (!fab) return;
+
+    fab.addEventListener('click', () => overlay.classList.add('active'));
+    btnCancel.addEventListener('click', () => overlay.classList.remove('active'));
+    if (btnEditCancel) {
+        btnEditCancel.addEventListener('click', (e) => {
+            e.preventDefault();
+            editOverlay.classList.remove('active');
+        });
+    }
+
+    // 追加処理
+    btnSave.addEventListener('click', () => {
+        const catalogId = parseInt(select.value);
+        const status = document.getElementById('seas-status').value;
+
+        if (!catalogId) return alert('調味料を選んでください');
+
+        const data = {
+            catalog_id: catalogId,
+            status: status
+        };
+
+        fetch('/api/seasonings', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(data)
+        })
+        .then(res => {
+            if (!res.ok) throw new Error('Failed');
+            overlay.classList.remove('active');
+            
+            // ★修正: 在庫更新後に、カタログ(プルダウン)も更新する
+            return window.fetchSeasoning().then(() => window.fetchCatalogForSeas());
+        })
+        .catch(err => alert('エラー: ' + err));
+    });
+
+    // 削除処理
+    if (btnDelete) {
+        btnDelete.addEventListener('click', () => {
+            const id = document.getElementById('seas-edit-id').value;
+            if(!confirm('ストックから外しますか？')) return;
+
+            fetch(`/api/seasonings?id=${id}`, {
+                method: 'DELETE'
+            })
+            .then(res => {
+                if (!res.ok) throw new Error('Delete failed');
+                editOverlay.classList.remove('active');
+                
+                // ★修正: 在庫更新後に、カタログ(プルダウン)も更新する
+                return window.fetchSeasoning().then(() => window.fetchCatalogForSeas());
+            })
+            .catch(err => alert('削除エラー: ' + err));
+        });
+    }
+}
+

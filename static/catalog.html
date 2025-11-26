@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Manage Item Catalog</title>
+    <style>
+        :root {
+            --primary-color: #4a90e2;
+            --secondary-color: #50e3c2;
+            --background-color: #f4f7f6;
+            --card-background: #ffffff;
+            --text-color: #333;
+            --border-color: #ddd;
+            --shadow-color: rgba(0, 0, 0, 0.1);
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: var(--background-color);
+            color: var(--text-color);
+        }
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+        }
+        h1 { color: var(--primary-color); }
+        .card {
+            background-color: var(--card-background);
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 6px var(--shadow-color);
+        }
+        .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; }
+        .form-grid .full-width { grid-column: 1 / -1; }
+        label { display: block; margin-bottom: 5px; font-weight: 500; }
+        input, select, textarea, button {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            box-sizing: border-box;
+            font-size: 1em;
+        }
+        button { background-color: var(--primary-color); color: white; border: none; cursor: pointer; }
+        textarea { resize: vertical; min-height: 100px; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        th, td { padding: 12px; text-align: left; border-bottom: 1px solid var(--border-color); }
+        th { background-color: #f8f8f8; }
+        a { color: var(--primary-color); }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <a href="/">&laquo; Back to Menu</a>
+        <h1>Manage Item Catalog</h1>
+
+        <div class="card">
+            <h2>Add Single Item</h2>
+            <form id="addItemForm" class="form-grid">
+                <div>
+                    <label for="name">Name</label>
+                    <input type="text" id="name" required>
+                </div>
+                <div>
+                    <label for="classification">Classification</label>
+                    <select id="classification">
+                        <option value="食材">食材 (Ingredient)</option>
+                        <option value="調味料">調味料 (Seasoning)</option>
+                    </select>
+                </div>
+                <div>
+                    <label for="category">Category</label>
+                    <input type="text" id="category" placeholder="e.g., 肉, 野菜, スパイス">
+                </div>
+                <div>
+                    <label for="default_unit">Default Unit</label>
+                    <input type="text" id="default_unit" list="unit-list" placeholder="e.g., g, 個, ml">
+                </div>
+                <button type="submit" class="full-width">Add Item to Catalog</button>
+            </form>
+        </div>
+
+        <div class="card">
+            <h2>Bulk Add Seasonings</h2>
+            <form id="bulkAddForm">
+                <label for="bulk-names">Enter one seasoning name per line:</label>
+                <textarea id="bulk-names" placeholder="塩&#10;コショウ&#10;醤油..."></textarea>
+                <button type="submit" style="margin-top: 10px;">Bulk Add Seasonings</button>
+            </form>
+        </div>
+
+        <div class="card">
+            <h2>Catalog Items</h2>
+            <a href="/api/catalog/export" class="button-link" style="background-color: #50e3c2; color: white; padding: 10px 15px; border-radius: 4px; text-decoration: none; display: inline-block; margin-bottom: 15px;">Export as CSV</a>
+            <table id="catalogTable">
+                <thead><tr><th>Name</th><th>Classification</th><th>Category</th><th>Default Unit</th></tr></thead>
+                <tbody id="catalogList"></tbody>
+            </table>
+        </div>
+    </div>
+    
+    <datalist id="unit-list">
+        <option value="g"></option><option value="個"></option><option value="ml"></option>
+        <option value="小さじ"></option><option value="大さじ"></option><option value="振り"></option>
+    </datalist>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const singleForm = document.getElementById('addItemForm');
+            const bulkForm = document.getElementById('bulkAddForm');
+            const catalogList = document.getElementById('catalogList');
+
+            const fetchCatalog = async () => {
+                try {
+                    const response = await fetch('/api/catalog');
+                    if (!response.ok) throw new Error('Network response was not ok');
+                    const items = await response.json();
+                    
+                    catalogList.innerHTML = '';
+                    if (!items) return;
+                    
+                    items.forEach(item => {
+                        const tr = document.createElement('tr');
+                        tr.innerHTML = `
+                            <td>${item.name || ''}</td>
+                            <td>${item.classification || ''}</td>
+                            <td>${item.category || ''}</td>
+                            <td>${item.default_unit || ''}</td>
+                        `;
+                        catalogList.appendChild(tr);
+                    });
+                } catch (error) {
+                    console.error('Failed to fetch catalog:', error);
+                    catalogList.innerHTML = '<tr><td colspan="4">Failed to load catalog.</td></tr>';
+                }
+            };
+            
+            const postItems = async (items) => {
+                try {
+                    const response = await fetch('/api/catalog', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(items),
+                    });
+                    if (!response.ok) {
+                        const errorText = await response.text();
+                        throw new Error(`Server error: ${errorText}`);
+                    }
+                    await response.json();
+                    return true;
+                } catch (error) {
+                    console.error('Failed to post items:', error);
+                    alert(`Error: ${error.message}`);
+                    return false;
+                }
+            };
+
+            singleForm.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const item = {
+                    name: document.getElementById('name').value,
+                    classification: document.getElementById('classification').value,
+                    category: document.getElementById('category').value,
+                    default_unit: document.getElementById('default_unit').value,
+                };
+                const success = await postItems([item]); // API expects an array
+                if (success) {
+                    singleForm.reset();
+                    fetchCatalog();
+                }
+            });
+
+            bulkForm.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const namesText = document.getElementById('bulk-names').value;
+                const names = namesText.split('\n').map(name => name.trim()).filter(name => name);
+                
+                if (names.length === 0) return;
+
+                const items = names.map(name => ({
+                    name: name,
+                    classification: '調味料' // Default to seasoning for bulk add
+                }));
+
+                const success = await postItems(items);
+                if (success) {
+                    bulkForm.reset();
+                    fetchCatalog();
+                }
+            });
+
+            fetchCatalog(); // Initial load
+        });
+    </script>
+</body>
+</html>

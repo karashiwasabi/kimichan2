@@ -1,0 +1,1582 @@
+----- C:\Users\wasab\OneDrive\デスクトップ\kimichan2\static\css\base.css -----
+:root {
+    --primary-color: #ff9f43;
+    --primary-light: #fff3e0;
+    --accent-color: #ff6b6b;
+    --text-main: #4a4a4a;
+    --text-sub: #878787;
+    --bg-color: #f7f9fc;
+    --card-bg: #ffffff;
+    --border-radius: 16px;
+    --shadow-soft: 0 4px 12px rgba(0, 0, 0, 0.05);
+}
+
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+    -webkit-tap-highlight-color: transparent;
+}
+
+body {
+    font-family: "Hiragino Kaku Gothic ProN", "Noto Sans JP", sans-serif;
+    background-color: var(--bg-color);
+    color: var(--text-main);
+    padding-bottom: 80px;
+}
+
+/* アイコン視認性強化 */
+.icon-strong {
+    opacity: 1 !important;
+    filter: none !important;
+    font-size: 1.2em;
+}
+.icon-faint {
+    opacity: 0.2;
+    filter: grayscale(100%);
+}
+
+----- C:\Users\wasab\OneDrive\デスクトップ\kimichan2\static\css\components.css -----
+/* カード */
+.card-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.card {
+    background: var(--card-bg);
+    border-radius: var(--border-radius);
+    padding: 16px;
+    box-shadow: var(--shadow-soft);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.card-content {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+/* タグ・バッジ */
+.tag {
+    font-size: 10px;
+    background-color: var(--primary-light);
+    color: var(--primary-color);
+    padding: 3px 8px;
+    border-radius: 4px;
+    align-self: flex-start;
+}
+
+.location-badge {
+    font-size: 10px;
+    background-color: #e0f2f1;
+    color: #009688;
+    padding: 3px 8px;
+    border-radius: 4px;
+    margin-left: 5px;
+}
+
+.loc-header-badge {
+    display: inline-block;
+    background: #eee;
+    color: #666;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: bold;
+    margin-bottom: 5px;
+}
+
+.item-name {
+    font-size: 16px;
+    font-weight: bold;
+}
+
+.item-unit {
+    font-size: 12px;
+    color: var(--text-sub);
+}
+
+/* フォーム */
+.form-group {
+    margin-bottom: 16px;
+}
+
+.label {
+    display: block;
+    font-size: 12px;
+    margin-bottom: 6px;
+    color: var(--text-sub);
+}
+
+.input-field {
+    width: 100%;
+    padding: 12px;
+    border: 1px solid #eee;
+    border-radius: 12px;
+    font-size: 16px;
+    outline: none;
+    background-color: #fff;
+}
+
+.input-field:focus {
+    border-color: var(--primary-color);
+}
+
+.textarea-field {
+    width: 100%;
+    padding: 12px;
+    border: 1px solid #eee;
+    border-radius: 12px;
+    font-size: 14px;
+    min-height: 100px;
+    font-family: monospace;
+    resize: none;
+}
+
+.search-area {
+    margin-bottom: 20px;
+}
+
+.search-input {
+    width: 100%;
+    padding: 12px 20px;
+    border: none;
+    border-radius: 30px;
+    background-color: var(--card-bg);
+    box-shadow: var(--shadow-soft);
+    font-size: 14px;
+    outline: none;
+    transition: 0.3s;
+}
+
+.search-input:focus {
+    box-shadow: 0 4px 15px rgba(255, 159, 67, 0.2);
+}
+
+/* ボタン */
+.btn-row {
+    display: flex;
+    gap: 12px;
+    margin-top: 10px;
+    flex-shrink: 0;
+}
+
+.btn {
+    flex: 1;
+    padding: 14px;
+    border: none;
+    border-radius: 12px;
+    font-weight: bold;
+    font-size: 14px;
+    cursor: pointer;
+    text-decoration: none;
+    text-align: center;
+    display: inline-block;
+}
+
+.btn-cancel {
+    background: var(--bg-color);
+    color: var(--text-sub);
+}
+
+.btn-save {
+    background: var(--primary-color);
+    color: white;
+}
+
+.btn-delete {
+    background: #ffebee;
+    color: #e74c3c;
+}
+
+.fab {
+    position: fixed;
+    bottom: 90px;
+    right: 20px;
+    width: 56px;
+    height: 56px;
+    background-color: var(--primary-color);
+    color: white;
+    border-radius: 50%;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    font-size: 28px;
+    box-shadow: 0 4px 15px rgba(255, 159, 67, 0.4);
+    border: none;
+    cursor: pointer;
+    z-index: 90;
+}
+
+/* タブ */
+.tab-group {
+    display: flex;
+    background: var(--bg-color);
+    padding: 4px;
+    border-radius: 12px;
+    margin-bottom: 20px;
+}
+
+.tab-btn {
+    flex: 1;
+    padding: 8px;
+    border: none;
+    background: none;
+    border-radius: 10px;
+    font-size: 13px;
+    color: var(--text-sub);
+    cursor: pointer;
+}
+
+.tab-btn.active {
+    background: white;
+    color: var(--primary-color);
+    box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+    font-weight: bold;
+}
+
+/* ステッパー */
+.stepper-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    background: #f9f9f9;
+    padding: 15px;
+    border-radius: 12px;
+}
+.stepper-display {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 10px;
+    width: 100%;
+    justify-content: center;
+}
+.stepper-btn {
+    width: 50px;
+    height: 50px;
+    border-radius: 50%;
+    border: none;
+    background: white;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+    font-size: 24px;
+    color: var(--primary-color);
+    cursor: pointer;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+.stepper-btn:active {
+    background: #eee;
+    transform: scale(0.95);
+}
+.stepper-value {
+    font-size: 24px;
+    font-weight: bold;
+    width: 100px;
+    text-align: center;
+    border: none;
+    background: transparent;
+    outline: none;
+}
+.preset-chips {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    justify-content: center;
+}
+.preset-chip {
+    padding: 6px 12px;
+    border-radius: 20px;
+    background: white;
+    border: 1px solid #eee;
+    font-size: 12px;
+    color: var(--text-sub);
+    cursor: pointer;
+}
+.preset-chip:active {
+    background: var(--primary-light);
+    color: var(--primary-color);
+}
+
+----- C:\Users\wasab\OneDrive\デスクトップ\kimichan2\static\css\layout.css -----
+header {
+    background-color: var(--card-bg);
+    padding: 15px 20px;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.03);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+.logo {
+    font-size: 18px;
+    font-weight: bold;
+    color: var(--primary-color);
+    letter-spacing: 0.05em;
+}
+
+.container {
+    padding: 20px;
+    max-width: 600px;
+    margin: 0 auto;
+}
+
+.bottom-nav {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    height: 70px;
+    background: var(--card-bg);
+    display: flex;
+    justify-content: space-around;
+    align-items: center;
+    border-top-left-radius: 20px;
+    border-top-right-radius: 20px;
+    box-shadow: 0 -5px 20px rgba(0,0,0,0.05);
+    z-index: 100;
+}
+
+.nav-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    font-size: 10px;
+    color: var(--text-sub);
+    text-decoration: none;
+    width: 60px;
+}
+
+.nav-item.active {
+    color: var(--primary-color);
+    font-weight: bold;
+}
+
+.nav-icon {
+    font-size: 24px;
+    margin-bottom: 4px;
+}
+
+/* モーダル共通 */
+.modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0,0,0,0.4);
+    backdrop-filter: blur(2px);
+    z-index: 200;
+    display: none;
+    justify-content: center;
+    align-items: flex-end;
+}
+
+.modal-overlay.active {
+    display: flex;
+}
+
+.modal-sheet {
+    background: var(--card-bg);
+    width: 100%;
+    max-width: 600px;
+    border-top-left-radius: 24px;
+    border-top-right-radius: 24px;
+    padding: 24px;
+    max-height: 85vh;
+    display: flex;
+    flex-direction: column;
+    animation: slideUp 0.3s ease-out;
+}
+
+.modal-sheet.full-screen {
+    height: 100%;
+    max-height: 100%;
+    border-radius: 0;
+    padding: 0;
+}
+
+.modal-sheet.full-screen .modal-header {
+    padding: 15px;
+    background: white;
+    border-bottom: 1px solid #eee;
+    margin-bottom: 0;
+}
+
+.modal-sheet.full-screen .modal-scroll-area {
+    padding: 20px;
+}
+
+.modal-sheet.full-screen .btn-row {
+    padding: 15px;
+    background: white;
+    border-top: 1px solid #eee;
+    margin-top: 0;
+}
+
+@keyframes slideUp {
+    from { transform: translateY(100%); }
+    to { transform: translateY(0); }
+}
+
+.modal-header {
+    text-align: center;
+    margin-bottom: 15px;
+    font-weight: bold;
+    font-size: 16px;
+    flex-shrink: 0;
+}
+
+/* ★修正箇所：flex: 1 (親要素の高さに合わせて柔軟に伸びる設定) が重要 */
+.modal-scroll-area {
+    flex: 1;
+    overflow-y: auto;
+    margin-bottom: 15px;
+    padding-right: 5px;
+}
+
+----- C:\Users\wasab\OneDrive\デスクトップ\kimichan2\static\css\views.css -----
+/* 冷蔵庫スナップショットエリア */
+.fridge-snapshot-area {
+    display: flex;
+    overflow-x: auto;
+    gap: 10px;
+    padding-bottom: 5px;
+    margin-bottom: 15px;
+    margin-top: 5px;
+    border-bottom: 1px dashed #eee;
+    min-height: 110px;
+}
+.fridge-snapshot-area::-webkit-scrollbar {
+    display: none;
+}
+
+.snapshot-card {
+    flex: 0 0 133px; /* 4:3比率基準: 高さ100pxなら幅133px */
+    height: 100px;
+    position: relative;
+    border-radius: 12px;
+    overflow: hidden;
+    background: #f0f0f0;
+    border: 1px solid #ddd;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.snapshot-img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    cursor: pointer;
+    display: block;
+}
+
+.btn-add-snapshot {
+    flex: 0 0 80px;
+    height: 100px;
+    background: #fff;
+    border: 2px dashed #ccc;
+    border-radius: 12px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    cursor: pointer;
+    color: #999;
+    font-size: 10px;
+    font-weight: bold;
+}
+
+.btn-delete-snapshot {
+    position: absolute;
+    top: 5px;
+    right: 5px;
+    background: rgba(0,0,0,0.5);
+    color: white;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    border: none;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    font-size: 14px;
+    cursor: pointer;
+    z-index: 10;
+}
+
+/* モーダルでの写真拡大 */
+.modal-image-view {
+    width: 100%;
+    height: auto;
+    max-height: 80vh;
+    object-fit: contain;
+}
+
+/* カタログ画面用 */
+.category-wrapper {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    margin-bottom: 10px;
+}
+.scroll-btn {
+    background: var(--card-bg);
+    border: 1px solid #eee;
+    border-radius: 50%;
+    width: 30px;
+    height: 30px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    color: var(--text-sub);
+    flex-shrink: 0;
+    font-size: 12px;
+}
+.category-scroll {
+    display: flex;
+    overflow-x: auto;
+    gap: 8px;
+    padding-bottom: 5px;
+    scrollbar-width: none;
+    flex: 1;
+    scroll-behavior: smooth;
+}
+.category-scroll::-webkit-scrollbar {
+    display: none;
+}
+.cat-chip {
+    background: var(--card-bg);
+    border: 1px solid #eee;
+    padding: 6px 12px;
+    border-radius: 20px;
+    font-size: 12px;
+    white-space: nowrap;
+    color: var(--text-sub);
+    cursor: pointer;
+    transition: 0.2s;
+}
+.cat-chip.active {
+    background: var(--primary-color);
+    color: white;
+    border-color: var(--primary-color);
+    font-weight: bold;
+}
+
+/* レシピ画面用 */
+.recipe-group-header {
+    background: #fff3e0;
+    color: #e67e22;
+    padding: 5px 10px;
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: bold;
+    margin-top: 10px;
+    margin-bottom: 5px;
+}
+.ing-status-ok {
+    color: #27ae60;
+    font-weight: bold;
+}
+.ing-status-missing {
+    color: #e74c3c;
+    font-weight: bold;
+    background: #fee;
+    padding: 2px 6px;
+    border-radius: 4px;
+}
+
+----- C:\Users\wasab\OneDrive\デスクトップ\kimichan2\static\views\catalog_view.html -----
+<div style="display:flex; justify-content:flex-end; margin-bottom:10px;">
+    <a href="/api/catalog/export" class="btn" style="padding:6px 12px; font-size:11px; background:#eee; color:#666;">
+        📥 CSV出力
+    </a>
+</div>
+
+<div class="category-wrapper">
+    <button id="scroll-left" class="scroll-btn">◀</button>
+    <div id="category-filters" class="category-scroll">
+    </div>
+    <button id="scroll-right" class="scroll-btn">▶</button>
+</div>
+
+<div class="search-area">
+    <input type="text" id="catalog-search" class="search-input" placeholder="食材名で検索...">
+</div>
+
+<div id="catalog-list" class="card-list">
+</div>
+
+<button id="fab-add" class="fab">＋</button>
+
+<div id="modal-overlay" class="modal-overlay">
+    <div class="modal-sheet">
+        <div class="modal-header" id="modal-title">アイテム登録</div>
+        
+        <div class="modal-scroll-area">
+            <input type="hidden" id="edit-id">
+            <input type="hidden" id="original-unit">
+
+            <div class="tab-group" style="margin-bottom:15px;">
+                <button type="button" id="tab-single" class="tab-btn active">個別入力</button>
+                <button type="button" id="tab-csv" class="tab-btn">一括登録</button>
+            </div>
+
+            <div id="form-single">
+                <div class="form-group">
+                    <label class="label">分類</label>
+                    <select id="input-classification" class="input-field">
+                        <option value="食材">食材</option>
+                        <option value="調味料">調味料</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label class="label">カテゴリ</label>
+                    <div style="display:flex; gap:10px;">
+                         <select id="select-category" class="input-field" style="flex:1;">
+                            <option value="">(新規入力)</option>
+                         </select>
+                         <input type="text" id="input-category" class="input-field" style="flex:1;" placeholder="新規カテゴリ名">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label class="label">食材名</label>
+                    <input type="text" id="input-name" class="input-field" placeholder="例: キャベツ">
+                </div>
+                <div class="form-group">
+                    <label class="label">よみがな (任意)</label>
+                    <input type="text" id="input-kana" class="input-field" placeholder="例: きゃべつ">
+                </div>
+                <div class="form-group">
+                    <label class="label">単位</label>
+                    <input type="text" id="input-unit" class="input-field" placeholder="例: 個, g">
+                    <p style="font-size:10px; color:#e74c3c; margin-top:4px;">※単位を変えると在庫数の意味が変わる場合があります。</p>
+                </div>
+            </div>
+
+            <div id="form-csv" style="display:none;">
+                <div class="form-group">
+                    <label class="label">CSV貼り付け (品名,分類,カテゴリ,単位,よみがな)</label>
+                    <p style="font-size:11px; color:#999; margin-bottom:5px;">例: キャベツ,食材,野菜,個,きゃべつ</p>
+                    <textarea id="input-csv-text" class="textarea-field" placeholder="キャベツ,食材,野菜,個,きゃべつ&#13;&#10;豚バラ,食材,肉類,g,ぶたばら&#13;&#10;醤油,調味料,,g,しょうゆ"></textarea>
+                </div>
+                <div id="csv-result-area" class="result" style="display:none; margin-top: 10px; padding: 10px; background-color: #e8f5e9; border: 1px solid #c8e6c9; border-radius: 8px;"></div>
+            </div>
+        </div>
+        <div class="btn-row">
+            <button id="btn-cancel" class="btn btn-cancel">キャンセル</button>
+            <button id="btn-save" class="btn btn-save">保存</button>
+        </div>
+    </div>
+</div>
+
+----- C:\Users\wasab\OneDrive\デスクトップ\kimichan2\static\views\inventory_view.html -----
+<div class="fridge-snapshot-area" id="fridge-snapshot-list">
+    </div>
+<input type="file" id="snapshot-file" accept="image/*" capture="environment" style="display:none;">
+
+<div class="search-area">
+    <input type="text" id="inventory-search" class="search-input" placeholder="冷蔵庫の中身を検索...">
+</div>
+
+<div id="inventory-list" class="card-list">
+</div>
+
+<button id="fab-add-inventory" class="fab">＋</button>
+
+<div id="modal-inventory" class="modal-overlay">
+    <div class="modal-sheet">
+        <div class="modal-header">食材を追加</div>
+        
+        <div class="modal-scroll-area">
+            <div class="form-group">
+                <label class="label">食材を選ぶ</label>
+                <select id="inv-select-catalog" class="input-field">
+                    <option value="">カタログから選択...</option>
+                </select>
+            </div>
+            
+            <div class="form-group">
+                <label class="label">保管場所</label>
+                <div style="display:flex; gap:10px;">
+                    <select id="inv-location" class="input-field" style="flex:1;">
+                        </select>
+                    <button type="button" id="btn-manage-loc" style="padding:0 12px; border:1px solid #eee; background:#fff; border-radius:12px; cursor:pointer;">⚙</button>
+                </div>
+            </div>
+
+            <div style="border-top:1px dashed #eee; margin:15px 0;"></div>
+
+            <div class="form-group" style="display:flex; align-items:center; justify-content:space-between;">
+                <label class="label" style="margin:0; font-size:14px; color:#333;">詳細（数量・期限）を入力する</label>
+                <input type="checkbox" id="inv-detail-toggle" style="transform:scale(1.3);">
+            </div>
+
+            <div id="inv-detail-area" style="display:none; background:#f9f9f9; padding:10px; border-radius:8px; margin-bottom:15px;">
+                <div class="form-group">
+                    <label class="label">数量</label>
+                    <div class="stepper-container" style="background:#fff;">
+                        <div class="stepper-display">
+                            <button type="button" class="stepper-btn" id="btn-minus" onclick="addAmount(-1)">－</button>
+                            <input type="number" id="inv-amount" class="stepper-value" placeholder="0" value="1">
+                            <button type="button" class="stepper-btn" id="btn-plus" onclick="addAmount(1)">＋</button>
+                            <span id="inv-unit-display" style="font-size:14px; color:#666;"></span>
+                        </div>
+                        <div class="preset-chips">
+                            <div class="preset-chip" onclick="addAmount(0.5)">+0.5</div>
+                            <div class="preset-chip" onclick="addAmount(1)">+1</div>
+                            <div class="preset-chip" onclick="addAmount(10)">+10</div>
+                        </div>
+                    </div>
+                    <input type="hidden" id="inv-unit">
+                </div>
+
+                <div class="form-group">
+                    <label class="label">賞味期限</label>
+                    <input type="date" id="inv-date" class="input-field" style="background:#fff;">
+                </div>
+            </div>
+        </div>
+
+        <div class="btn-row">
+            <button id="btn-inv-cancel" class="btn btn-cancel">やめる</button>
+            <button id="btn-inv-save" class="btn btn-save">在庫にする</button>
+        </div>
+    </div>
+</div>
+
+<div id="modal-inv-edit" class="modal-overlay">
+    <div class="modal-sheet">
+        <div class="modal-header" id="inv-edit-title">食材の管理</div>
+        <input type="hidden" id="inv-edit-id">
+        
+        <div class="modal-scroll-area">
+            <div class="form-group">
+                <label class="label">現在の数量 (-1 は数量なし)</label>
+                <div style="display:flex; gap:10px;">
+                    <input type="number" id="inv-edit-amount" class="input-field">
+                    <div id="inv-edit-unit" style="padding:12px; background:#f9f9f9; border-radius:8px;"></div>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label class="label">保管場所</label>
+                <select id="inv-edit-location" class="input-field"></select>
+            </div>
+
+            <div class="form-group">
+                <label class="label">賞味期限</label>
+                <input type="date" id="inv-edit-date" class="input-field">
+            </div>
+        </div>
+
+        <div class="btn-row">
+            <button id="btn-inv-delete" class="btn" style="background:#e74c3c; color:white;">使い切った (削除)</button>
+            <button id="btn-inv-update" class="btn btn-save">変更を保存</button>
+        </div>
+        <div style="margin-top:10px; text-align:center;">
+            <a href="#" id="btn-inv-edit-cancel" style="font-size:12px; color:#999;">閉じる</a>
+        </div>
+    </div>
+</div>
+
+<div id="modal-loc-manage" class="modal-overlay" style="z-index:300;">
+    <div class="modal-sheet">
+        <div class="modal-header">保管場所の設定</div>
+        <div class="modal-scroll-area">
+            <ul id="loc-manage-list" class="location-manage-list"></ul>
+            <div style="display:flex; gap:10px; margin-top:15px;">
+                <input type="text" id="new-loc-name" class="input-field" placeholder="新しい場所名">
+                <button id="btn-add-loc" class="btn btn-save" style="flex:0 0 60px;">追加</button>
+            </div>
+        </div>
+        <div class="btn-row">
+            <button id="btn-loc-close" class="btn btn-cancel">閉じる</button>
+        </div>
+    </div>
+</div>
+
+<div id="modal-photo-view" class="modal-overlay" style="z-index:400; background:rgba(0,0,0,0.9);">
+    <div style="position:relative; max-width:100%; text-align:center;">
+        <img id="photo-view-img" class="modal-image-view">
+        <button id="btn-photo-close" style="position:absolute; top:-40px; right:10px; color:white; background:none; border:none; font-size:24px;">✕ 閉じる</button>
+    </div>
+</div>
+
+----- C:\Users\wasab\OneDrive\デスクトップ\kimichan2\static\views\recipes_view.html -----
+<div class="search-area">
+    <input type="text" id="recipe-search" class="search-input" placeholder="レシピを検索...">
+</div>
+
+<div id="recipe-list" class="card-list">
+</div>
+
+<button id="fab-add-recipe" class="fab">＋</button>
+
+<div id="modal-recipe" class="modal-overlay">
+    <div class="modal-sheet full-screen">
+        <div class="modal-header" id="modal-recipe-title">レシピ登録</div>
+        
+        <div class="modal-scroll-area">
+            <input type="hidden" id="rec-id">
+            
+            <div class="form-group">
+                <label class="label">レシピ名</label>
+                <input type="text" id="rec-name" class="input-field" placeholder="例: 至高の豚汁">
+            </div>
+
+            <div class="form-group">
+                <label class="label">分量・何人前</label>
+                <input type="text" id="rec-yield" class="input-field" placeholder="例: 2人分">
+            </div>
+
+            <div class="form-group">
+                <label class="label">参照URL (YouTubeなど)</label>
+                <input type="text" id="rec-url" class="input-field" placeholder="https://...">
+            </div>
+
+            <div class="form-group">
+                <label class="label">作り方・メモ</label>
+                <textarea id="rec-process" class="textarea-field" placeholder="手順をここに..." style="min-height:200px;"></textarea>
+            </div>
+
+            <div class="form-group">
+                <label class="label">材料リスト</label>
+                <p style="font-size:11px; color:#999; margin-bottom:5px;">
+                    例:「豚バラ,200,g」または「＝ソース＝」で見出しが作れます。<br>
+                    外部サイトのレシピもそのまま貼り付けてみてください。
+                </p>
+                <textarea id="rec-csv" class="textarea-field" style="min-height:150px;" placeholder="豚バラ肉,280,g&#13;&#10;大根,0.5,本"></textarea>
+            </div>
+        </div>
+
+        <div class="btn-row">
+            <button id="btn-rec-cancel" class="btn btn-cancel">閉じる</button>
+            <button id="btn-rec-save" class="btn btn-save">保存する</button>
+        </div>
+    </div>
+</div>
+
+<div id="modal-recipe-detail" class="modal-overlay">
+    <div class="modal-sheet full-screen">
+        <div class="modal-header" id="detail-title" style="font-size:18px; color:#e67e22;">レシピ詳細</div>
+        
+        <div class="modal-scroll-area">
+            <div id="detail-yield" style="text-align:center; font-size:12px; color:#666; margin-bottom:10px;"></div>
+            
+            <div id="detail-missing-alert" class="missing-alert-box" style="display:none;"></div>
+
+            <div style="margin-bottom:20px; text-align:center;">
+                <a id="detail-link" href="#" target="_blank" class="btn" style="background:#e74c3c; color:white; text-decoration:none; display:inline-block; padding:10px 20px; border-radius:30px; font-size:14px;">
+                    ▶ YouTubeで見る
+                </a>
+            </div>
+
+            <div class="form-group">
+                <label class="label">材料</label>
+                <div id="detail-ingredients" style="background:#f9f9f9; padding:10px; border-radius:8px; font-size:14px; line-height:1.6;">
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label class="label">作り方</label>
+                <div id="detail-process" style="white-space:pre-wrap; background:#f9f9f9; padding:10px; border-radius:8px; font-size:14px;">
+                </div>
+            </div>
+        </div>
+
+        <div class="btn-row">
+            <button id="btn-detail-close" class="btn btn-cancel">閉じる</button>
+            <button id="btn-detail-edit" class="btn btn-save" style="background-color:#f39c12;">修正する</button>
+        </div>
+    </div>
+</div>
+
+<div id="modal-missing-ing" class="modal-overlay" style="z-index: 300;">
+    <div class="modal-sheet">
+        <div class="modal-header" style="color:#e74c3c;">未登録の食材があります</div>
+        <div class="modal-scroll-area" id="missing-list-area" style="max-height:300px;"></div>
+        <div class="btn-row">
+            <button id="btn-missing-cancel" class="btn btn-cancel">やめる</button>
+            <button id="btn-missing-register" class="btn btn-save">登録して保存</button>
+        </div>
+    </div>
+</div>
+
+----- C:\Users\wasab\OneDrive\デスクトップ\kimichan2\static\views\seasoning_view.html -----
+<div class="search-area">
+    <input type="text" id="seasoning-search" class="search-input" placeholder="調味料を検索...">
+</div>
+
+<div id="seasoning-list" class="card-list">
+</div>
+
+<button id="fab-add-seasoning" class="fab">＋</button>
+
+<div id="modal-seasoning" class="modal-overlay">
+    <div class="modal-sheet">
+        <div class="modal-header">調味料を追加</div>
+        
+        <div class="form-group">
+            <label class="label">調味料を選ぶ</label>
+            <select id="seas-select-catalog" class="input-field">
+                <option value="">カタログから選択...</option>
+            </select>
+        </div>
+
+        <div class="form-group">
+            <label class="label">状態</label>
+            <select id="seas-status" class="input-field">
+                <option value="あり">あり</option>
+                <option value="少なめ">少なめ</option>
+                <option value="なし">なし</option>
+            </select>
+        </div>
+
+        <div class="btn-row">
+            <button id="btn-seas-cancel" class="btn btn-cancel">やめる</button>
+            <button id="btn-seas-save" class="btn btn-save">追加する</button>
+        </div>
+    </div>
+</div>
+
+<div id="modal-seasoning-edit" class="modal-overlay">
+    <div class="modal-sheet">
+        <div class="modal-header" id="seas-edit-title">調味料の管理</div>
+        <input type="hidden" id="seas-edit-id">
+
+        <p style="margin-bottom:20px; text-align:center; font-size:13px; color:#666;">
+            ストックから削除しますか？
+        </p>
+
+        <div class="btn-row">
+            <button id="btn-seas-delete" class="btn" style="background:#e74c3c; color:white;">ストックから外す (削除)</button>
+        </div>
+        <div style="margin-top:10px; text-align:center;">
+            <a href="#" id="btn-seas-edit-cancel" style="font-size:12px; color:#999;">閉じる</a>
+        </div>
+    </div>
+</div>
+
+----- C:\Users\wasab\OneDrive\デスクトップ\kimichan2\static\catalog.html -----
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Manage Item Catalog</title>
+    <style>
+        :root {
+            --primary-color: #4a90e2;
+            --secondary-color: #50e3c2;
+            --background-color: #f4f7f6;
+            --card-background: #ffffff;
+            --text-color: #333;
+            --border-color: #ddd;
+            --shadow-color: rgba(0, 0, 0, 0.1);
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: var(--background-color);
+            color: var(--text-color);
+        }
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+        }
+        h1 { color: var(--primary-color); }
+        .card {
+            background-color: var(--card-background);
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 6px var(--shadow-color);
+        }
+        .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; }
+        .form-grid .full-width { grid-column: 1 / -1; }
+        label { display: block; margin-bottom: 5px; font-weight: 500; }
+        input, select, textarea, button {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            box-sizing: border-box;
+            font-size: 1em;
+        }
+        button { background-color: var(--primary-color); color: white; border: none; cursor: pointer; }
+        textarea { resize: vertical; min-height: 100px; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        th, td { padding: 12px; text-align: left; border-bottom: 1px solid var(--border-color); }
+        th { background-color: #f8f8f8; }
+        a { color: var(--primary-color); }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <a href="/">&laquo; Back to Menu</a>
+        <h1>Manage Item Catalog</h1>
+
+        <div class="card">
+            <h2>Add Single Item</h2>
+            <form id="addItemForm" class="form-grid">
+                <div>
+                    <label for="name">Name</label>
+                    <input type="text" id="name" required>
+                </div>
+                <div>
+                    <label for="classification">Classification</label>
+                    <select id="classification">
+                        <option value="食材">食材 (Ingredient)</option>
+                        <option value="調味料">調味料 (Seasoning)</option>
+                    </select>
+                </div>
+                <div>
+                    <label for="category">Category</label>
+                    <input type="text" id="category" placeholder="e.g., 肉, 野菜, スパイス">
+                </div>
+                <div>
+                    <label for="default_unit">Default Unit</label>
+                    <input type="text" id="default_unit" list="unit-list" placeholder="e.g., g, 個, ml">
+                </div>
+                <button type="submit" class="full-width">Add Item to Catalog</button>
+            </form>
+        </div>
+
+        <div class="card">
+            <h2>Bulk Add Seasonings</h2>
+            <form id="bulkAddForm">
+                <label for="bulk-names">Enter one seasoning name per line:</label>
+                <textarea id="bulk-names" placeholder="塩&#10;コショウ&#10;醤油..."></textarea>
+                <button type="submit" style="margin-top: 10px;">Bulk Add Seasonings</button>
+            </form>
+        </div>
+
+        <div class="card">
+            <h2>Catalog Items</h2>
+            <a href="/api/catalog/export" class="button-link" style="background-color: #50e3c2; color: white; padding: 10px 15px; border-radius: 4px; text-decoration: none; display: inline-block; margin-bottom: 15px;">Export as CSV</a>
+            <table id="catalogTable">
+                <thead><tr><th>Name</th><th>Classification</th><th>Category</th><th>Default Unit</th></tr></thead>
+                <tbody id="catalogList"></tbody>
+            </table>
+        </div>
+    </div>
+    
+    <datalist id="unit-list">
+        <option value="g"></option><option value="個"></option><option value="ml"></option>
+        <option value="小さじ"></option><option value="大さじ"></option><option value="振り"></option>
+    </datalist>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const singleForm = document.getElementById('addItemForm');
+            const bulkForm = document.getElementById('bulkAddForm');
+            const catalogList = document.getElementById('catalogList');
+
+            const fetchCatalog = async () => {
+                try {
+                    const response = await fetch('/api/catalog');
+                    if (!response.ok) throw new Error('Network response was not ok');
+                    const items = await response.json();
+                    
+                    catalogList.innerHTML = '';
+                    if (!items) return;
+                    
+                    items.forEach(item => {
+                        const tr = document.createElement('tr');
+                        tr.innerHTML = `
+                            <td>${item.name || ''}</td>
+                            <td>${item.classification || ''}</td>
+                            <td>${item.category || ''}</td>
+                            <td>${item.default_unit || ''}</td>
+                        `;
+                        catalogList.appendChild(tr);
+                    });
+                } catch (error) {
+                    console.error('Failed to fetch catalog:', error);
+                    catalogList.innerHTML = '<tr><td colspan="4">Failed to load catalog.</td></tr>';
+                }
+            };
+            
+            const postItems = async (items) => {
+                try {
+                    const response = await fetch('/api/catalog', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(items),
+                    });
+                    if (!response.ok) {
+                        const errorText = await response.text();
+                        throw new Error(`Server error: ${errorText}`);
+                    }
+                    await response.json();
+                    return true;
+                } catch (error) {
+                    console.error('Failed to post items:', error);
+                    alert(`Error: ${error.message}`);
+                    return false;
+                }
+            };
+
+            singleForm.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const item = {
+                    name: document.getElementById('name').value,
+                    classification: document.getElementById('classification').value,
+                    category: document.getElementById('category').value,
+                    default_unit: document.getElementById('default_unit').value,
+                };
+                const success = await postItems([item]); // API expects an array
+                if (success) {
+                    singleForm.reset();
+                    fetchCatalog();
+                }
+            });
+
+            bulkForm.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const namesText = document.getElementById('bulk-names').value;
+                const names = namesText.split('\n').map(name => name.trim()).filter(name => name);
+                
+                if (names.length === 0) return;
+
+                const items = names.map(name => ({
+                    name: name,
+                    classification: '調味料' // Default to seasoning for bulk add
+                }));
+
+                const success = await postItems(items);
+                if (success) {
+                    bulkForm.reset();
+                    fetchCatalog();
+                }
+            });
+
+            fetchCatalog(); // Initial load
+        });
+    </script>
+</body>
+</html>
+
+
+----- C:\Users\wasab\OneDrive\デスクトップ\kimichan2\static\index.html -----
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Kimichan Kitchen</title>
+    
+    <link rel="stylesheet" href="css/base.css">
+    <link rel="stylesheet" href="css/layout.css">
+    <link rel="stylesheet" href="css/components.css">
+    <link rel="stylesheet" href="css/views.css">
+</head>
+<body>
+
+    <header>
+        <div class="logo">きみちゃんキッチン</div>
+    </header>
+
+    <main id="app-container" class="container">
+    </main>
+
+    <nav class="bottom-nav">
+        <a href="#" class="nav-item" data-view="inventory">
+      
+       <span class="nav-icon">🥦</span>
+            <span>食材</span>
+        </a>
+        <a href="#" class="nav-item" data-view="seasoning">
+            <span class="nav-icon">🧂</span>
+            <span>調味料</span>
+        </a>
+        <a href="#" class="nav-item" data-view="recipes">
+            <span class="nav-icon">🍳</span>
+     
+        <span>レシピ</span>
+        </a>
+        <a href="#" class="nav-item" data-view="catalog">
+            <span class="nav-icon">📖</span>
+            <span>図鑑</span>
+        </a>
+    </nav>
+
+    <script src="js/catalog.js"></script>
+    <script src="js/inventory_locations.js"></script>
+    <script src="js/inventory_photos.js"></script>
+    <script src="js/inventory.js"></script>
+    <script src="js/seasoning_fetch.js"></script>
+    <script src="js/seasoning_ui.js"></script>
+    <script src="js/recipe_list.js"></script>
+    <script src="js/recipe_edit.js"></script>
+  
+   <script src="js/app.js"></script>
+</body>
+</html>
+
+----- C:\Users\wasab\OneDrive\デスクトップ\kimichan2\static\ingredients.html -----
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Manage Ingredients</title>
+    <style>
+        :root {
+            --primary-color: #4a90e2;
+            --background-color: #f4f7f6;
+            --card-background: #ffffff;
+            --text-color: #333;
+            --border-color: #ddd;
+            --shadow-color: rgba(0, 0, 0, 0.1);
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: var(--background-color);
+            color: var(--text-color);
+        }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { color: var(--primary-color); }
+        .card {
+            background-color: var(--card-background);
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 6px var(--shadow-color);
+        }
+        .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px; }
+        .form-grid .full-width { grid-column: 1 / -1; }
+        label { display: block; margin-bottom: 5px; font-weight: 500; }
+        input, select, button {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            box-sizing: border-box;
+            font-size: 1em;
+        }
+        button { background-color: var(--primary-color); color: white; border: none; cursor: pointer; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        th, td { padding: 12px; text-align: left; border-bottom: 1px solid var(--border-color); }
+        th { background-color: #f8f8f8; }
+        a { color: var(--primary-color); }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <a href="/">&laquo; Back to Menu</a>
+        <h1>Manage Ingredients</h1>
+
+        <div class="card">
+            <h2>Add Ingredient to Refrigerator</h2>
+            <form id="addIngredientForm" class="form-grid">
+                <div class="full-width">
+                    <label for="catalog-select">Ingredient</label>
+                    <select id="catalog-select" required></select>
+                </div>
+                <div>
+                    <label for="amount">Amount</label>
+                    <input type="number" id="amount" step="any" required>
+                </div>
+                <div>
+                    <label for="unit">Unit</label>
+                    <input type="text" id="unit" required>
+                </div>
+                <div class="full-width">
+                    <label for="exp-date">Expiration Date</label>
+                    <input type="date" id="exp-date">
+                </div>
+                <button type="submit" class="full-width">Add to Refrigerator</button>
+            </form>
+        </div>
+
+        <div class="card">
+            <h2>Ingredients in Refrigerator</h2>
+            <table id="inventoryTable">
+                <thead><tr><th>Name</th><th>Amount</th><th>Unit</th><th>Expires</th></tr></thead>
+                <tbody id="inventoryList"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', async () => {
+            const catalogSelect = document.getElementById('catalog-select');
+            const unitInput = document.getElementById('unit');
+            const inventoryList = document.getElementById('inventoryList');
+            const form = document.getElementById('addIngredientForm');
+
+            let ingredientsCatalog = [];
+
+            // 1. Fetch catalog and populate dropdown
+            try {
+                const response = await fetch('/api/catalog');
+                const catalog = await response.json();
+                ingredientsCatalog = catalog.filter(item => item.classification === '食材');
+                
+                catalogSelect.innerHTML = '<option value="">Select an ingredient...</option>';
+                ingredientsCatalog.forEach(item => {
+                    const option = document.createElement('option');
+                    option.value = item.id;
+                    option.textContent = item.name;
+                    catalogSelect.appendChild(option);
+                });
+            } catch (error) {
+                console.error('Failed to load catalog:', error);
+                catalogSelect.innerHTML = '<option value="">Could not load catalog</option>';
+            }
+            
+            // 2. Fetch and render inventory
+            const fetchInventory = async () => {
+                try {
+                    const response = await fetch('/api/ingredients');
+                    const inventory = await response.json();
+                    inventoryList.innerHTML = '';
+                    if (!inventory) return;
+                    inventory.forEach(item => {
+                        const tr = document.createElement('tr');
+                        tr.innerHTML = `
+                            <td>${item.name || ''}</td>
+                            <td>${item.amount || ''}</td>
+                            <td>${item.unit || ''}</td>
+                            <td>${item.expiration_date ? item.expiration_date.split('T')[0] : ''}</td>
+                        `;
+                        inventoryList.appendChild(tr);
+                    });
+                } catch (error) {
+                    console.error('Failed to load inventory:', error);
+                }
+            };
+
+            // 3. Handle dropdown change to autofill unit
+            catalogSelect.addEventListener('change', () => {
+                const selectedId = parseInt(catalogSelect.value, 10);
+                const selectedItem = ingredientsCatalog.find(item => item.id === selectedId);
+                if (selectedItem) {
+                    unitInput.value = selectedItem.default_unit || '';
+                }
+            });
+
+            // 4. Handle form submission
+            form.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const body = {
+                    catalog_id: parseInt(catalogSelect.value, 10),
+                    amount: parseFloat(document.getElementById('amount').value) || 0,
+                    unit: unitInput.value,
+                    expiration_date: document.getElementById('exp-date').value,
+                };
+
+                if (!body.catalog_id) {
+                    alert('Please select an ingredient.');
+                    return;
+                }
+
+                try {
+                    const response = await fetch('/api/ingredients', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(body),
+                    });
+                    if (!response.ok) throw new Error(await response.text());
+                    
+                    form.reset();
+                    catalogSelect.value = "";
+                    await fetchInventory();
+
+                } catch (error) {
+                    console.error('Failed to add ingredient:', error);
+                    alert('Error adding ingredient.');
+                }
+            });
+            
+            // Initial load
+            await fetchInventory();
+        });
+    </script>
+</body>
+</html>
+
+
+----- C:\Users\wasab\OneDrive\デスクトップ\kimichan2\static\seasonings.html -----
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Manage Seasonings</title>
+    <style>
+        :root {
+            --secondary-color: #50e3c2;
+            --background-color: #f4f7f6;
+            --card-background: #ffffff;
+            --text-color: #333;
+            --border-color: #ddd;
+            --shadow-color: rgba(0, 0, 0, 0.1);
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: var(--background-color);
+            color: var(--text-color);
+        }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { color: var(--secondary-color); }
+        .card {
+            background-color: var(--card-background);
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 6px var(--shadow-color);
+        }
+        .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
+        .form-grid .full-width { grid-column: 1 / -1; }
+        label { display: block; margin-bottom: 5px; font-weight: 500; }
+        input, select, button {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            box-sizing: border-box;
+            font-size: 1em;
+        }
+        button { background-color: var(--secondary-color); color: white; border: none; cursor: pointer; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        th, td { padding: 12px; text-align: left; border-bottom: 1px solid var(--border-color); }
+        th { background-color: #f8f8f8; }
+        a { color: var(--secondary-color); text-decoration: none; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <a href="/">&laquo; Back to Menu</a>
+        <h1>Manage Seasonings</h1>
+
+        <div class="card">
+            <h2>Add Seasoning to Stock</h2>
+            <form id="addSeasoningForm" class="form-grid">
+                <div class="full-width">
+                    <label for="catalog-select">Seasoning</label>
+                    <select id="catalog-select" required></select>
+                </div>
+                <div>
+                    <label for="status-select">Status</label>
+                    <select id="status-select">
+                        <option value="あり">あり (In Stock)</option>
+                        <option value="残りわずか">残りわずか (Low Stock)</option>
+                        <option value="なし">なし (Out of Stock)</option>
+                    </select>
+                </div>
+                <button type="submit" class="full-width">Add to Stock</button>
+            </form>
+        </div>
+
+        <div class="card">
+            <h2>Seasonings in Stock</h2>
+            <table id="inventoryTable">
+                <thead><tr><th>Name</th><th>Category</th><th>Status</th></tr></thead>
+                <tbody id="inventoryList"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', async () => {
+            const catalogSelect = document.getElementById('catalog-select');
+            const statusSelect = document.getElementById('status-select');
+            const inventoryList = document.getElementById('inventoryList');
+            const form = document.getElementById('addSeasoningForm');
+
+            // 1. Fetch catalog and populate dropdown
+            try {
+                const response = await fetch('/api/catalog');
+                const catalog = await response.json();
+                const seasoningsCatalog = catalog.filter(item => item.classification === '調味料');
+                
+                catalogSelect.innerHTML = '<option value="">Select a seasoning...</option>';
+                seasoningsCatalog.forEach(item => {
+                    const option = document.createElement('option');
+                    option.value = item.id;
+                    option.textContent = item.name;
+                    catalogSelect.appendChild(option);
+                });
+            } catch (error) {
+                console.error('Failed to load catalog:', error);
+                catalogSelect.innerHTML = '<option value="">Could not load catalog</option>';
+            }
+            
+            // 2. Fetch and render inventory
+            const fetchInventory = async () => {
+                try {
+                    const response = await fetch('/api/seasonings');
+                    const inventory = await response.json();
+                    inventoryList.innerHTML = '';
+                    if (!inventory) return;
+                    inventory.forEach(item => {
+                        const tr = document.createElement('tr');
+                        tr.innerHTML = `
+                            <td>${item.name || ''}</td>
+                            <td>${item.category || ''}</td>
+                            <td>${item.status || ''}</td>
+                        `;
+                        inventoryList.appendChild(tr);
+                    });
+                } catch (error) {
+                    console.error('Failed to load inventory:', error);
+                }
+            };
+
+            // 3. Handle form submission
+            form.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const body = {
+                    catalog_id: parseInt(catalogSelect.value, 10),
+                    status: statusSelect.value,
+                };
+
+                if (!body.catalog_id) {
+                    alert('Please select a seasoning.');
+                    return;
+                }
+
+                try {
+                    const response = await fetch('/api/seasonings', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(body),
+                    });
+                    if (!response.ok) throw new Error(await response.text());
+                    
+                    form.reset();
+                    catalogSelect.value = "";
+                    await fetchInventory();
+
+                } catch (error) {
+                    console.error('Failed to add seasoning:', error);
+                    alert('Error adding seasoning.');
+                }
+            });
+            
+            // Initial load
+            await fetchInventory();
+        });
+    </script>
+</body>
+</html>
+
+

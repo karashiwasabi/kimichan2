@@ -1,0 +1,36 @@
+:root {
+    --primary-color: #ff9f43;
+    --primary-light: #fff3e0;
+    --accent-color: #ff6b6b;
+    --text-main: #4a4a4a;
+    --text-sub: #878787;
+    --bg-color: #f7f9fc;
+    --card-bg: #ffffff;
+    --border-radius: 16px;
+    --shadow-soft: 0 4px 12px rgba(0, 0, 0, 0.05);
+}
+
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+    -webkit-tap-highlight-color: transparent;
+}
+
+body {
+    font-family: "Hiragino Kaku Gothic ProN", "Noto Sans JP", sans-serif;
+    background-color: var(--bg-color);
+    color: var(--text-main);
+    padding-bottom: 80px;
+}
+
+/* アイコン視認性強化 */
+.icon-strong {
+    opacity: 1 !important;
+    filter: none !important;
+    font-size: 1.2em;
+}
+.icon-faint {
+    opacity: 0.2;
+    filter: grayscale(100%);
+}
