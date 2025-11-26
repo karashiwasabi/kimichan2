@@ -1,0 +1,27 @@
+# --- 生成された実行ファイル ---
+main
+main.exe
+*.exe
+*.dll
+*.so
+*.dylib
+
+# --- データベース (重要: 個人情報を守るため) ---
+*.db
+*.db-journal
+*.sqlite
+kimichan.db
+
+# --- アップロードされた画像データ ---
+# (ローカルでテストした画像などをGitに入れない)
+images/
+
+# --- OSやエディタの自動生成ファイル ---
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# --- その他 ---
+*.log
+.env
