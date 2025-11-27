@@ -1,10 +1,10 @@
 package main
 
 import (
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 )
 
 func handleIngredients(w http.ResponseWriter, r *http.Request) {
@@ -22,41 +22,48 @@ func handleIngredients(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func getIngredients(w http.ResponseWriter, _ *http.Request) {
-	const query = `
-		SELECT
-			i.id, i.catalog_id, i.amount, i.unit, i.expiration_date, i.location, 
-			i.created_at, i.updated_at, c.name,
-			(SELECT COUNT(DISTINCT recipe_id) FROM recipe_ingredients WHERE catalog_id = i.catalog_id) as recipe_count
+func getIngredients(w http.ResponseWriter, r *http.Request) {
+	// ★追加: 全件取得フラグ
+	isAll := r.URL.Query().Get("all") == "true"
+
+	query := `
+		SELECT 
+			i.id, i.catalog_id, i.amount, i.unit, i.expiration_date, i.location, i.created_at, i.updated_at,
+			c.name,
+			(SELECT COUNT(*) FROM recipe_ingredients ri WHERE ri.catalog_id = c.id) as recipe_count
 		FROM refrigerator_ingredients i
 		JOIN item_catalog c ON i.catalog_id = c.id
-		LEFT JOIN locations l ON i.location = l.name
-		ORDER BY 
-			CASE WHEN l.priority IS NULL THEN 9999 ELSE l.priority END ASC,
-			c.kana ASC,
-			c.name ASC;
+		ORDER BY i.location ASC, c.name ASC
 	`
+
+	// ★変更: クラウド上のみ制限。PCでは全件。
+	isCloud := os.Getenv("K_SERVICE") != ""
+	if isCloud && !isAll {
+		query += " LIMIT 100"
+	}
+
 	rows, err := db.Query(query)
+	// ... (以下、変更なし) ...
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	defer rows.Close()
 
-	items := []Ingredient{}
+	ingredients := []Ingredient{}
 	for rows.Next() {
 		var item Ingredient
-		var loc sql.NullString
-
-		if err := rows.Scan(&item.ID, &item.CatalogID, &item.Amount, &item.Unit, &item.ExpirationDate, &loc, &item.CreatedAt, &item.UpdatedAt, &item.Name, &item.RecipeCount); err != nil {
+		if err := rows.Scan(
+			&item.ID, &item.CatalogID, &item.Amount, &item.Unit, &item.ExpirationDate, &item.Location, &item.CreatedAt, &item.UpdatedAt,
+			&item.Name, &item.RecipeCount,
+		); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		item.Location = loc.String
-		items = append(items, item)
+		ingredients = append(ingredients, item)
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(items)
+	json.NewEncoder(w).Encode(ingredients)
 }
 
 func addIngredient(w http.ResponseWriter, r *http.Request) {

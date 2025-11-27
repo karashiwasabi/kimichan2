@@ -77,76 +77,117 @@ function renderInventory(items) {
     const listEl = document.getElementById('inventory-list');
     if (!listEl) return;
     listEl.innerHTML = '';
-    let currentLocation = null;
 
-    if (items.length === 0) {
-        listEl.innerHTML = '<div style="text-align:center; padding:20px; color:#999;">該当する食材はありません</div>';
-        return;
-    }
-
+    // 場所リスト定義（固定）
+    const fixedLocations = ["冷蔵室", "チルド", "冷凍室", "野菜室", "その他"];
+    
+    // アイテムを場所ごとに振り分け
+    const itemsByLoc = {};
+    fixedLocations.forEach(loc => itemsByLoc[loc] = []);
+    
+    // 定義外の場所も考慮して振り分け
     items.forEach(item => {
-        if (item.location !== currentLocation) {
-            currentLocation = item.location;
-            const header = document.createElement('div');
-            header.className = 'loc-header-badge';
-            header.textContent = currentLocation || 'その他';
-            if (listEl.children.length > 0) header.style.marginTop = '15px';
-         
-            listEl.appendChild(header);
-
-            // 写真エリアの挿入
-            if (window.renderLocationPhotos) {
-                const photoStrip = window.renderLocationPhotos(currentLocation || 'その他');
-                listEl.appendChild(photoStrip);
-            }
-        }
-
-        const div = document.createElement('div');
-        div.className = 'card';
-        div.onclick = (e) => {
-            if (!e.target.classList.contains('recipe-badge')) {
-                openInventoryEdit(item);
-            }
-        };
-      
-        let badgeHtml = '';
-        if (item.recipe_count > 0) {
-            badgeHtml = `
-            <span class="recipe-badge" onclick="goToFilteredRecipes(${item.catalog_id}, '${item.name}')" 
-                  style="background:#e67e22; color:white; padding:4px 10px; border-radius:20px; font-size:11px; font-weight:bold;
-margin-left:10px; cursor:pointer;">
-                🍳 ${item.recipe_count}
-            </span>`;
-        }
-
-        let thumbHtml = '';
-        if (item.image_path) {
-            thumbHtml = `<img src="/images/${item.image_path}" class="list-thumbnail">`;
-        }
-
-        let amountDisplay = '';
-        if (item.amount === -1) {
-            amountDisplay = '<span style="color:#27ae60;font-weight:bold;">在庫あり</span>';
+        const loc = item.location || 'その他';
+        if (itemsByLoc[loc]) {
+            itemsByLoc[loc].push(item);
         } else {
-            amountDisplay = `${item.amount} ${item.unit}`;
+            // 定義外は「その他」に入れるか、新たなキーを作るか。
+            // 今回は「その他」にまとめる方針で実装
+            itemsByLoc['その他'].push(item);
+        }
+    });
+
+    // 描画ループ
+    fixedLocations.forEach(loc => {
+        const locItems = itemsByLoc[loc] || [];
+
+        // 1. 場所ヘッダー
+        const header = document.createElement('div');
+        header.className = 'loc-header-badge';
+        header.textContent = loc;
+        listEl.appendChild(header);
+
+        // 2. 写真エリア
+        if (window.renderLocationPhotos) {
+            const photoStrip = window.renderLocationPhotos(loc);
+            listEl.appendChild(photoStrip);
         }
 
-        div.innerHTML = `
-            <div style="display:flex; align-items:center;">
-                ${thumbHtml}
-                <div class="card-content" style="flex:1;">
+        // 3. アイテムリスト
+        if (locItems.length === 0) {
+            const emptyMsg = document.createElement('div');
+            emptyMsg.className = 'inventory-empty-msg';
+            emptyMsg.textContent = '（在庫なし）';
+            listEl.appendChild(emptyMsg);
+        } else {
+            locItems.forEach(item => {
+                const div = document.createElement('div');
+                div.className = 'card';
+                div.onclick = (e) => {
+                    if (!e.target.classList.contains('recipe-badge-btn')) {
+                        openInventoryEdit(item);
+                    }
+                };
+            
+                // --- 日付の色判定 (クラス切り替え) ---
+                const today = new Date();
+                today.setHours(0,0,0,0);
+                const expDate = new Date(item.expiration_date);
+                expDate.setHours(0,0,0,0);
+                
+                const diffTime = expDate - today;
+                const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)); 
+
+                let dateClass = 'status-normal'; // 黒
+                let dateText = item.expiration_date.split('T')[0];
+
+                if (diffDays < 0) {
+                    dateClass = 'status-expired'; // 赤
+                    dateText += ' (期限切れ)';
+                } else if (diffDays <= 2) {
+                    dateClass = 'status-soon'; // 青
+                    if (diffDays === 0) dateText += ' (今日)';
+                    else dateText += ` (あと${diffDays}日)`;
+                }
+
+                // バッジ
+                let badgeHtml = '';
+                if (item.recipe_count > 0) {
+                    badgeHtml = `<span class="recipe-badge-btn" onclick="goToFilteredRecipes(${item.catalog_id}, '${item.name}')">🍳 ${item.recipe_count}</span>`;
+                }
+
+                // サムネイル
+                let thumbHtml = '';
+                if (item.image_path) {
+                    thumbHtml = `<img src="/images/${item.image_path}" class="list-thumbnail">`;
+                }
+
+                // 在庫数
+                let amountDisplay = '';
+                if (item.amount === -1) {
+                    amountDisplay = '<span class="stock-status-ok">在庫あり</span>';
+                } else {
+                    amountDisplay = `${item.amount} ${item.unit}`;
+                }
+
+                div.innerHTML = `
                     <div style="display:flex; align-items:center;">
-                        <span class="tag">期限: ${item.expiration_date.split('T')[0]}</span>
+                        ${thumbHtml}
+                        <div class="card-content" style="flex:1;">
+                            <div style="display:flex; align-items:center;">
+                                <span class="tag date-tag ${dateClass}">期限: ${dateText}</span>
+                            </div>
+                            <div style="display:flex; align-items:center; margin-top:4px;">
+                                <span class="item-name">${item.name}</span>
+                                ${badgeHtml}
+                            </div>
+                        </div>
                     </div>
-                    <div style="display:flex; align-items:center; margin-top:4px;">
-                        <span class="item-name">${item.name}</span>
-                        ${badgeHtml}
-                    </div>
-                </div>
-            </div>
-           <div class="item-unit">${amountDisplay}</div>
-        `;
-        listEl.appendChild(div);
+                    <div class="item-unit">${amountDisplay}</div>
+                `;
+                listEl.appendChild(div);
+            });
+        }
     });
 }
 
@@ -193,9 +234,8 @@ function setupInventoryUI() {
     const btnDelete = document.getElementById('btn-inv-delete');
     const select = document.getElementById('inv-select-catalog');
     const unitInput = document.getElementById('inv-unit');
-    const searchInput = document.getElementById('inventory-search'); // ★追加
+    const searchInput = document.getElementById('inventory-search');
 
-    // ★検索ロジックの追加
     if (searchInput) {
         searchInput.addEventListener('input', (e) => {
             const term = e.target.value.toLowerCase().trim();
@@ -203,6 +243,9 @@ function setupInventoryUI() {
                 renderInventory(inventoryData);
                 return;
             }
+            // 検索時も場所分け表示を維持するため、フィルタリング後に renderInventory に渡す
+            // ただし renderInventory は全件再描画で場所分けするので、
+            // フィルタ後のデータを渡しても正しく動く
             const filtered = inventoryData.filter(item => 
                 item.name.toLowerCase().includes(term)
             );
@@ -241,7 +284,6 @@ function setupInventoryUI() {
         unitInput.value = u;
     });
 
-    // 保存処理
     btnSave.addEventListener('click', () => {
         const catalogId = parseInt(select.value);
         const location = document.getElementById('inv-location').value;
@@ -283,7 +325,6 @@ function setupInventoryUI() {
         .catch(err => alert('エラー: ' + err));
     });
 
-    // 更新処理
     btnUpdate.addEventListener('click', () => {
         const id = document.getElementById('inv-edit-id').value;
         const amount = parseFloat(document.getElementById('inv-edit-amount').value);
@@ -317,7 +358,6 @@ function setupInventoryUI() {
         .catch(err => alert('更新エラー: ' + err));
     });
 
-    // 削除処理
     btnDelete.addEventListener('click', () => {
         if (!confirm('本当に削除しますか？（使い切ったことになります）')) return;
         const id = document.getElementById('inv-edit-id').value;

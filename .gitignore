@@ -25,3 +25,4 @@ Thumbs.db
 # --- その他 ---
 *.log
 .env
+config.json

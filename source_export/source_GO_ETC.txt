@@ -1,3 +1,480 @@
+----- C:\Users\wasab\OneDrive\デスクトップ\kimichan2\tools\cleaner\main.go -----
+package main
+
+import (
+	"database/sql"
+	"encoding/json"
+	"fmt"
+	"log"
+	"time"
+
+	"kimichan/tools/common"
+)
+
+type MasterCleanResult struct {
+	RealName       string `json:"real_name"`
+	Classification string `json:"classification"`
+	Category       string `json:"category"`
+	Details        string `json:"details"`
+}
+
+func main() {
+	cfg, err := common.LoadConfig()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	db, err := common.ConnectDB()
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer db.Close()
+
+	fmt.Println("🧹 スーパーお掃除ロボット、起動します...")
+
+	rows, err := db.Query("SELECT id, name, classification, category FROM item_catalog")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	type Target struct {
+		ID   int
+		Name string
+		Cls  string
+		Cat  string
+	}
+	var targets []Target
+	for rows.Next() {
+		var t Target
+		rows.Scan(&t.ID, &t.Name, &t.Cls, &t.Cat)
+		targets = append(targets, t)
+	}
+	rows.Close()
+
+	fmt.Printf("📦 全 %d 件の食材を検査・整理します。\n", len(targets))
+
+	for i, t := range targets {
+		fmt.Printf("[%d/%d] 検査中: %s ... ", i+1, len(targets), t.Name)
+
+		res, err := askGeminiMaster(t.Name, cfg.GeminiApiKey)
+		if err != nil {
+			fmt.Printf("❌ AIエラー: %v\n", err)
+			continue
+		}
+
+		needsUpdate := false
+		if res.RealName != t.Name {
+			needsUpdate = true
+		}
+		if t.Cls == "" && res.Classification != "" {
+			needsUpdate = true
+		}
+		if t.Cat == "" && res.Category != "" {
+			needsUpdate = true
+		}
+
+		if !needsUpdate {
+			fmt.Println("🆗 完璧です")
+			continue
+		}
+
+		fmt.Printf("\n    👉 修正案: [%s] (分類:%s / カテゴリ:%s / 詳細:%s)\n",
+			res.RealName, res.Classification, res.Category, res.Details)
+
+		if err := executeMasterClean(db, t.ID, res); err != nil {
+			fmt.Printf("    ❌ DB更新エラー: %v\n", err)
+		} else {
+			fmt.Println("    ✅ 修正・統合完了！")
+		}
+
+		time.Sleep(1500 * time.Millisecond)
+	}
+	fmt.Println("\n✨ 全てのお掃除が完了しました！")
+}
+
+func askGeminiMaster(name, apiKey string) (*MasterCleanResult, error) {
+	prompt := fmt.Sprintf(`
+あなたは食材データベースの管理者です。
+食材名「%s」を正規化してください。JSONのみ出力。
+
+【ルール】
+1. real_name: 一般名称にする（「玉ねぎ(みじん切り)」→「玉ねぎ」）。
+2. classification: 「食材」か「調味料」。
+3. category: 「野菜」「肉」「魚介」「乾物」など。
+4. details: 補足情報（みじん切り、ソース用、Aなど）。なければ空文字。
+`, name)
+
+	txt, err := common.CallGemini(prompt, apiKey)
+	if err != nil {
+		return nil, err
+	}
+
+	var res MasterCleanResult
+	if err := json.Unmarshal([]byte(txt), &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func executeMasterClean(db *sql.DB, oldID int, res *MasterCleanResult) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+
+	var masterID int
+	err = tx.QueryRow("SELECT id FROM item_catalog WHERE name = ?", res.RealName).Scan(&masterID)
+
+	if err == sql.ErrNoRows {
+		query := `UPDATE item_catalog SET name=?, classification=?, category=? WHERE id=?`
+		_, err = tx.Exec(query, res.RealName, res.Classification, res.Category, oldID)
+		if err != nil {
+			tx.Rollback()
+			return err
+		}
+		masterID = oldID
+	}
+
+	if res.Details != "" {
+		query := `UPDATE recipe_ingredients SET catalog_id = ?, details = CASE WHEN details = '' THEN ? ELSE details || ' ' || ? END WHERE catalog_id = ?`
+		_, err = tx.Exec(query, masterID, res.Details, res.Details, oldID)
+		if err != nil {
+			tx.Rollback()
+			return err
+		}
+	} else if masterID != oldID {
+		_, err = tx.Exec("UPDATE recipe_ingredients SET catalog_id = ? WHERE catalog_id = ?", masterID, oldID)
+		if err != nil {
+			tx.Rollback()
+			return err
+		}
+	}
+
+	if masterID != oldID {
+		_, err = tx.Exec("DELETE FROM item_catalog WHERE id = ?", oldID)
+		if err != nil {
+			tx.Rollback()
+			return err
+		}
+	}
+
+	return tx.Commit()
+}
+
+
+----- C:\Users\wasab\OneDrive\デスクトップ\kimichan2\tools\common\common.go -----
+package common
+
+import (
+	"bytes"
+	"database/sql"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	_ "github.com/mattn/go-sqlite3"
+)
+
+// 設定ファイル
+const CONFIG_FILE = "config.json"
+
+type Config struct {
+	GeminiApiKey string `json:"gemini_api_key"`
+}
+
+// Geminiのリクエスト構造体
+type GeminiRequest struct {
+	Contents []Content `json:"contents"`
+}
+type Content struct {
+	Parts []Part `json:"parts"`
+}
+type Part struct {
+	Text string `json:"text"`
+}
+type GeminiResponse struct {
+	Candidates []struct {
+		Content struct {
+			Parts []struct {
+				Text string `json:"text"`
+			} `json:"parts"`
+		} `json:"content"`
+	} `json:"candidates"`
+}
+
+// --- 共通関数 ---
+
+// 設定を読み込む
+func LoadConfig() (*Config, error) {
+	// 親フォルダなども探す
+	wd, _ := os.Getwd()
+	paths := []string{
+		filepath.Join(wd, CONFIG_FILE),
+		filepath.Join(wd, "..", CONFIG_FILE),
+		filepath.Join(wd, "..", "..", CONFIG_FILE),
+	}
+
+	for _, p := range paths {
+		if _, err := os.Stat(p); err == nil {
+			file, err := os.Open(p)
+			if err != nil {
+				return nil, err
+			}
+			defer file.Close()
+			var cfg Config
+			if err := json.NewDecoder(file).Decode(&cfg); err == nil {
+				return &cfg, nil
+			}
+		}
+	}
+	return nil, fmt.Errorf("config.json が見つかりません")
+}
+
+// DBに接続する
+func ConnectDB() (*sql.DB, error) {
+	wd, _ := os.Getwd()
+	// いくつかの場所を探す
+	paths := []string{
+		filepath.Join(wd, "kimichan.db"),
+		filepath.Join(wd, "..", "kimichan.db"),
+		filepath.Join(wd, "..", "..", "kimichan.db"),
+	}
+
+	var dbPath string
+	for _, p := range paths {
+		if _, err := os.Stat(p); err == nil {
+			dbPath = p
+			break
+		}
+	}
+	if dbPath == "" {
+		// 見つからなければカレントに作る前提
+		dbPath = "kimichan.db"
+	}
+
+	return sql.Open("sqlite3", dbPath)
+}
+
+// Geminiを呼び出す
+func CallGemini(prompt string, apiKey string) (string, error) {
+	url := "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=" + apiKey
+	reqBody, _ := json.Marshal(GeminiRequest{Contents: []Content{{Parts: []Part{{Text: prompt}}}}})
+
+	for i := 0; i < 3; i++ {
+		resp, err := http.Post(url, "application/json", bytes.NewBuffer(reqBody))
+		if err != nil {
+			return "", err
+		}
+		defer resp.Body.Close()
+
+		body, _ := io.ReadAll(resp.Body)
+		if resp.StatusCode == 200 {
+			var geminiResp GeminiResponse
+			json.Unmarshal(body, &geminiResp)
+			if len(geminiResp.Candidates) == 0 {
+				return "", fmt.Errorf("応答なし")
+			}
+			txt := geminiResp.Candidates[0].Content.Parts[0].Text
+
+			// JSON切り出し
+			start := strings.Index(txt, "{")
+			if start == -1 {
+				start = strings.Index(txt, "[")
+			} // 配列の場合も考慮
+
+			end := strings.LastIndex(txt, "}")
+			if end == -1 {
+				end = strings.LastIndex(txt, "]")
+			}
+
+			if start != -1 && end != -1 {
+				return txt[start : end+1], nil
+			}
+			return "", fmt.Errorf("JSONが見つかりません")
+		}
+		if resp.StatusCode == 503 {
+			time.Sleep(3 * time.Second)
+			continue
+		}
+		return "", fmt.Errorf("API Error: %s", resp.Status)
+	}
+	return "", fmt.Errorf("リトライ上限")
+}
+
+
+----- C:\Users\wasab\OneDrive\デスクトップ\kimichan2\tools\generator\main.go -----
+package main
+
+import (
+	"database/sql"
+	"encoding/json"
+	"fmt"
+	"log"
+	"net/http"
+	"time"
+
+	"kimichan/tools/common" // ★共通部品をインポート
+
+	"github.com/PuerkitoBio/goquery"
+	_ "github.com/mattn/go-sqlite3"
+)
+
+// 設定
+const TARGET_URL = "https://bazurecipe.com/"
+const LIMIT_TOTAL = 100
+const LIMIT_PER_PAGE = 10
+const STATE_FILE = "generator_state.txt"
+
+type LinkAnalysisResult struct {
+	RecipeLinks []string `json:"recipe_links"`
+	NextPageURL string   `json:"next_page_url"`
+}
+type GeneratedRecipe struct {
+	Name        string `json:"name"`
+	Yield       string `json:"yield"`
+	Ingredients []struct {
+		Name   string `json:"name"`
+		Amount string `json:"amount"`
+	} `json:"ingredients"`
+	Process any `json:"process"`
+}
+
+var apiKey string
+
+func main() {
+	// 1. 設定＆DB読み込み（共通関数）
+	cfg, err := common.LoadConfig()
+	if err != nil {
+		log.Fatal(err)
+	}
+	apiKey = cfg.GeminiApiKey
+
+	db, err := common.ConnectDB()
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer db.Close()
+
+	fmt.Println("🤖 レシピ収集ロボット (共通化版)、起動...")
+
+	// しおり機能
+	currentURL := TARGET_URL
+	// (簡易化のため今回はしおり読み込み省略、または必要なら実装)
+
+	totalCollected := 0
+	pageCount := 1
+
+	for {
+		if totalCollected >= LIMIT_TOTAL {
+			break
+		}
+		fmt.Printf("\n📄 ページ解析中... [%s]\n", currentURL)
+
+		htmlText, err := fetchHTML(currentURL)
+		if err != nil {
+			log.Println("取得エラー:", err)
+			break
+		}
+
+		analysis, err := askGeminiForLinksAndNext(htmlText, currentURL)
+		if err != nil {
+			log.Println("解析エラー:", err)
+			break
+		}
+
+		links := analysis.RecipeLinks
+		if len(links) > LIMIT_PER_PAGE {
+			links = links[:LIMIT_PER_PAGE]
+		}
+		fmt.Printf("📦 発見: %d 件 / 次へ: %s\n", len(links), analysis.NextPageURL)
+
+		for _, link := range links {
+			if totalCollected >= LIMIT_TOTAL {
+				break
+			}
+			fmt.Printf("  🍳 解析中: %s ...\n", link)
+
+			detailHTML, err := fetchHTML(link)
+			if err == nil {
+				recipe, err := analyzeByGemini(detailHTML)
+				if err == nil {
+					saveRecipe(db, recipe, link)
+					totalCollected++
+				}
+			}
+			time.Sleep(2 * time.Second)
+		}
+
+		if analysis.NextPageURL != "" && analysis.NextPageURL != currentURL {
+			currentURL = analysis.NextPageURL
+			pageCount++
+		} else {
+			break
+		}
+	}
+}
+
+// HTML取得などの補助関数
+func fetchHTML(url string) (string, error) {
+	client := &http.Client{Timeout: 30 * time.Second}
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 ...") // 省略
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	doc, err := goquery.NewDocumentFromReader(resp.Body)
+	if err != nil {
+		return "", err
+	}
+	doc.Find("script, style, nav, footer").Remove()
+	return doc.Find("body").Text(), nil
+}
+
+func askGeminiForLinksAndNext(text, baseURL string) (*LinkAnalysisResult, error) {
+	prompt := fmt.Sprintf(`以下からレシピ詳細URLと次ページURLをJSON抽出: base=%s, text=%s`, baseURL, text[:2000]) // 短縮
+	resStr, err := common.CallGemini(prompt, apiKey)
+	if err != nil {
+		return nil, err
+	}
+	var res LinkAnalysisResult
+	json.Unmarshal([]byte(resStr), &res)
+	return &res, nil
+}
+
+func analyzeByGemini(text string) (*GeneratedRecipe, error) {
+	if len(text) > 30000 {
+		text = text[:30000]
+	}
+	prompt := `レシピ情報をJSON抽出(name, yield, ingredients[{name,amount}], process): ` + text
+	resStr, err := common.CallGemini(prompt, apiKey)
+	if err != nil {
+		return nil, err
+	}
+	var r GeneratedRecipe
+	json.Unmarshal([]byte(resStr), &r)
+	return &r, nil
+}
+
+func saveRecipe(db *sql.DB, r *GeneratedRecipe, url string) {
+	if r == nil || r.Name == "" {
+		return
+	}
+	// ... (保存ロジックは以前と同じなので省略可、必要ならコピー) ...
+	// ここでは簡略化してログだけ
+	fmt.Printf("    ✅ 保存完了: %s\n", r.Name)
+}
+
+
 ----- C:\Users\wasab\OneDrive\デスクトップ\kimichan2\database.go -----
 package main
 
@@ -144,12 +621,91 @@ module kimichan
 
 go 1.24.3
 
-require github.com/mattn/go-sqlite3 v1.14.32
+require (
+	github.com/PuerkitoBio/goquery v1.11.0
+	github.com/mattn/go-sqlite3 v1.14.32
+)
+
+require (
+	github.com/andybalholm/cascadia v1.3.3 // indirect
+	golang.org/x/net v0.47.0 // indirect
+)
 
 
 ----- C:\Users\wasab\OneDrive\デスクトップ\kimichan2\go.sum -----
+github.com/PuerkitoBio/goquery v1.11.0 h1:jZ7pwMQXIITcUXNH83LLk+txlaEy6NVOfTuP43xxfqw=
+github.com/PuerkitoBio/goquery v1.11.0/go.mod h1:wQHgxUOU3JGuj3oD/QFfxUdlzW6xPHfqyHre6VMY4DQ=
+github.com/andybalholm/cascadia v1.3.3 h1:AG2YHrzJIm4BZ19iwJ/DAua6Btl3IwJX+VI4kktS1LM=
+github.com/andybalholm/cascadia v1.3.3/go.mod h1:xNd9bqTn98Ln4DwST8/nG+H0yuB8Hmgu1YHNnWw0GeA=
+github.com/google/go-cmp v0.6.0/go.mod h1:17dUlkBOakJ0+DkrSSNjCkIjxS6bF9zb3elmeNGIjoY=
 github.com/mattn/go-sqlite3 v1.14.32 h1:JD12Ag3oLy1zQA+BNn74xRgaBbdhbNIDYvQUEuuErjs=
 github.com/mattn/go-sqlite3 v1.14.32/go.mod h1:Uh1q+B4BYcTPb+yiD3kU8Ct7aC0hY9fxUwlHK0RXw+Y=
+github.com/yuin/goldmark v1.4.13/go.mod h1:6yULJ656Px+3vBD8DxQVa3kxgyrAnzto9xy5taEt/CY=
+golang.org/x/crypto v0.0.0-20190308221718-c2843e01d9a2/go.mod h1:djNgcEr1/C05ACkg1iLfiJU5Ep61QUkGW8qpdssI0+w=
+golang.org/x/crypto v0.0.0-20210921155107-089bfa567519/go.mod h1:GvvjBRRGRdwPK5ydBHafDWAxML/pGHZbMvKqRZ5+Abc=
+golang.org/x/crypto v0.13.0/go.mod h1:y6Z2r+Rw4iayiXXAIxJIDAJ1zMW4yaTpebo8fPOliYc=
+golang.org/x/crypto v0.19.0/go.mod h1:Iy9bg/ha4yyC70EfRS8jz+B6ybOBKMaSxLj6P6oBDfU=
+golang.org/x/crypto v0.23.0/go.mod h1:CKFgDieR+mRhux2Lsu27y0fO304Db0wZe70UKqHu0v8=
+golang.org/x/crypto v0.31.0/go.mod h1:kDsLvtWBEx7MV9tJOj9bnXsPbxwJQ6csT/x4KIN4Ssk=
+golang.org/x/mod v0.6.0-dev.0.20220419223038-86c51ed26bb4/go.mod h1:jJ57K6gSWd91VN4djpZkiMVwK6gcyfeH4XE8wZrZaV4=
+golang.org/x/mod v0.8.0/go.mod h1:iBbtSCu2XBx23ZKBPSOrRkjjQPZFPuis4dIYUhu/chs=
+golang.org/x/mod v0.12.0/go.mod h1:iBbtSCu2XBx23ZKBPSOrRkjjQPZFPuis4dIYUhu/chs=
+golang.org/x/mod v0.15.0/go.mod h1:hTbmBsO62+eylJbnUtE2MGJUyE7QWk4xUqPFrRgJ+7c=
+golang.org/x/mod v0.17.0/go.mod h1:hTbmBsO62+eylJbnUtE2MGJUyE7QWk4xUqPFrRgJ+7c=
+golang.org/x/net v0.0.0-20190620200207-3b0461eec859/go.mod h1:z5CRVTTTmAJ677TzLLGU+0bjPO0LkuOLi4/5GtJWs/s=
+golang.org/x/net v0.0.0-20210226172049-e18ecbb05110/go.mod h1:m0MpNAwzfU5UDzcl9v0D8zg8gWTRqZa9RBIspLL5mdg=
+golang.org/x/net v0.0.0-20220722155237-a158d28d115b/go.mod h1:XRhObCWvk6IyKnWLug+ECip1KBveYUHfp+8e9klMJ9c=
+golang.org/x/net v0.6.0/go.mod h1:2Tu9+aMcznHK/AK1HMvgo6xiTLG5rD5rZLDS+rp2Bjs=
+golang.org/x/net v0.10.0/go.mod h1:0qNGK6F8kojg2nk9dLZ2mShWaEBan6FAoqfSigmmuDg=
+golang.org/x/net v0.15.0/go.mod h1:idbUs1IY1+zTqbi8yxTbhexhEEk5ur9LInksu6HrEpk=
+golang.org/x/net v0.21.0/go.mod h1:bIjVDfnllIU7BJ2DNgfnXvpSvtn8VRwhlsaeUTyUS44=
+golang.org/x/net v0.25.0/go.mod h1:JkAGAh7GEvH74S6FOH42FLoXpXbE/aqXSrIQjXgsiwM=
+golang.org/x/net v0.33.0/go.mod h1:HXLR5J+9DxmrqMwG9qjGCxZ+zKXxBru04zlTvWlWuN4=
+golang.org/x/net v0.47.0 h1:Mx+4dIFzqraBXUugkia1OOvlD6LemFo1ALMHjrXDOhY=
+golang.org/x/net v0.47.0/go.mod h1:/jNxtkgq5yWUGYkaZGqo27cfGZ1c5Nen03aYrrKpVRU=
+golang.org/x/sync v0.0.0-20190423024810-112230192c58/go.mod h1:RxMgew5VJxzue5/jJTE5uejpjVlOe/izrB70Jof72aM=
+golang.org/x/sync v0.0.0-20220722155255-886fb9371eb4/go.mod h1:RxMgew5VJxzue5/jJTE5uejpjVlOe/izrB70Jof72aM=
+golang.org/x/sync v0.1.0/go.mod h1:RxMgew5VJxzue5/jJTE5uejpjVlOe/izrB70Jof72aM=
+golang.org/x/sync v0.3.0/go.mod h1:FU7BRWz2tNW+3quACPkgCx/L+uEAv1htQ0V83Z9Rj+Y=
+golang.org/x/sync v0.6.0/go.mod h1:Czt+wKu1gCyEFDUtn0jG5QVvpJ6rzVqr5aXyt9drQfk=
+golang.org/x/sync v0.7.0/go.mod h1:Czt+wKu1gCyEFDUtn0jG5QVvpJ6rzVqr5aXyt9drQfk=
+golang.org/x/sync v0.10.0/go.mod h1:Czt+wKu1gCyEFDUtn0jG5QVvpJ6rzVqr5aXyt9drQfk=
+golang.org/x/sys v0.0.0-20190215142949-d0b11bdaac8a/go.mod h1:STP8DvDyc/dI5b8T5hshtkjS+E42TnysNCUPdjciGhY=
+golang.org/x/sys v0.0.0-20201119102817-f84b799fce68/go.mod h1:h1NjWce9XRLGQEsW7wpKNCjG9DtNlClVuFLEZdDNbEs=
+golang.org/x/sys v0.0.0-20210615035016-665e8c7367d1/go.mod h1:oPkhp1MJrh7nUepCBck5+mAzfO9JrbApNNgaTdGDITg=
+golang.org/x/sys v0.0.0-20220520151302-bc2c85ada10a/go.mod h1:oPkhp1MJrh7nUepCBck5+mAzfO9JrbApNNgaTdGDITg=
+golang.org/x/sys v0.0.0-20220722155257-8c9f86f7a55f/go.mod h1:oPkhp1MJrh7nUepCBck5+mAzfO9JrbApNNgaTdGDITg=
+golang.org/x/sys v0.5.0/go.mod h1:oPkhp1MJrh7nUepCBck5+mAzfO9JrbApNNgaTdGDITg=
+golang.org/x/sys v0.8.0/go.mod h1:oPkhp1MJrh7nUepCBck5+mAzfO9JrbApNNgaTdGDITg=
+golang.org/x/sys v0.12.0/go.mod h1:oPkhp1MJrh7nUepCBck5+mAzfO9JrbApNNgaTdGDITg=
+golang.org/x/sys v0.17.0/go.mod h1:/VUhepiaJMQUp4+oa/7Zr1D23ma6VTLIYjOOTFZPUcA=
+golang.org/x/sys v0.20.0/go.mod h1:/VUhepiaJMQUp4+oa/7Zr1D23ma6VTLIYjOOTFZPUcA=
+golang.org/x/sys v0.28.0/go.mod h1:/VUhepiaJMQUp4+oa/7Zr1D23ma6VTLIYjOOTFZPUcA=
+golang.org/x/telemetry v0.0.0-20240228155512-f48c80bd79b2/go.mod h1:TeRTkGYfJXctD9OcfyVLyj2J3IxLnKwHJR8f4D8a3YE=
+golang.org/x/term v0.0.0-20201126162022-7de9c90e9dd1/go.mod h1:bj7SfCRtBDWHUb9snDiAeCFNEtKQo2Wmx5Cou7ajbmo=
+golang.org/x/term v0.0.0-20210927222741-03fcf44c2211/go.mod h1:jbD1KX2456YbFQfuXm/mYQcufACuNUgVhRMnK/tPxf8=
+golang.org/x/term v0.5.0/go.mod h1:jMB1sMXY+tzblOD4FWmEbocvup2/aLOaQEp7JmGp78k=
+golang.org/x/term v0.8.0/go.mod h1:xPskH00ivmX89bAKVGSKKtLOWNx2+17Eiy94tnKShWo=
+golang.org/x/term v0.12.0/go.mod h1:owVbMEjm3cBLCHdkQu9b1opXd4ETQWc3BhuQGKgXgvU=
+golang.org/x/term v0.17.0/go.mod h1:lLRBjIVuehSbZlaOtGMbcMncT+aqLLLmKrsjNrUguwk=
+golang.org/x/term v0.20.0/go.mod h1:8UkIAJTvZgivsXaD6/pH6U9ecQzZ45awqEOzuCvwpFY=
+golang.org/x/term v0.27.0/go.mod h1:iMsnZpn0cago0GOrHO2+Y7u7JPn5AylBrcoWkElMTSM=
+golang.org/x/text v0.3.0/go.mod h1:NqM8EUOU14njkJ3fqMW+pc6Ldnwhi/IjpwHt7yyuwOQ=
+golang.org/x/text v0.3.3/go.mod h1:5Zoc/QRtKVWzQhOtBMvqHzDpF6irO9z98xDceosuGiQ=
+golang.org/x/text v0.3.7/go.mod h1:u+2+/6zg+i71rQMx5EYifcz6MCKuco9NR6JIITiCfzQ=
+golang.org/x/text v0.7.0/go.mod h1:mrYo+phRRbMaCq/xk9113O4dZlRixOauAjOtrjsXDZ8=
+golang.org/x/text v0.9.0/go.mod h1:e1OnstbJyHTd6l/uOt8jFFHp6TRDWZR/bV3emEE/zU8=
+golang.org/x/text v0.13.0/go.mod h1:TvPlkZtksWOMsz7fbANvkp4WM8x/WCo/om8BMLbz+aE=
+golang.org/x/text v0.14.0/go.mod h1:18ZOQIKpY8NJVqYksKHtTdi31H5itFRjB5/qKTNYzSU=
+golang.org/x/text v0.15.0/go.mod h1:18ZOQIKpY8NJVqYksKHtTdi31H5itFRjB5/qKTNYzSU=
+golang.org/x/text v0.21.0/go.mod h1:4IBbMaMmOPCJ8SecivzSH54+73PCFmPWxNTLm+vZkEQ=
+golang.org/x/tools v0.0.0-20180917221912-90fa682c2a6e/go.mod h1:n7NCudcB/nEzxVGmLbDWY5pfWTLqBcC2KZ6jyYvM4mQ=
+golang.org/x/tools v0.0.0-20191119224855-298f0cb1881e/go.mod h1:b+2E5dAYhXwXZwtnZ6UAqBI28+e2cm9otk0dWdXHAEo=
+golang.org/x/tools v0.1.12/go.mod h1:hNGJHUnrk76NpqgfD5Aqm5Crs+Hm0VOH/i9J2+nxYbc=
+golang.org/x/tools v0.6.0/go.mod h1:Xwgl3UAJ/d3gWutnCtw505GrjyAbvKui8lOU390QaIU=
+golang.org/x/tools v0.13.0/go.mod h1:HvlwmtVNQAhOuCjW7xxvovg8wbNq7LwfXh/k7wXUl58=
+golang.org/x/tools v0.21.1-0.20240508182429-e35e4ccd0d2d/go.mod h1:aiJjzUbINMkxbQROHiO6hDPo2LHcIPhhQsa9DLh0yGk=
+golang.org/x/xerrors v0.0.0-20190717185122-a985d3407aa7/go.mod h1:I/5z698sn9Ka8TeJc9MKroUUfqBBauWjQqLJ2OPfmY0=
 
 
 ----- C:\Users\wasab\OneDrive\デスクトップ\kimichan2\handlers_catalog.go -----
@@ -173,6 +729,44 @@ func handleCatalog(w http.ResponseWriter, r *http.Request) {
 	default:
 		sendJSONError(w, "Method Not Allowed", http.StatusMethodNotAllowed)
 	}
+}
+
+// 追加: 使用状況確認API
+func handleCatalogUsage(w http.ResponseWriter, r *http.Request) {
+	idStr := r.URL.Query().Get("id")
+	if idStr == "" {
+		sendJSONError(w, "id required", http.StatusBadRequest)
+		return
+	}
+
+	var recipeCount int
+	err := db.QueryRow("SELECT COUNT(DISTINCT recipe_id) FROM recipe_ingredients WHERE catalog_id = ?", idStr).Scan(&recipeCount)
+	if err != nil {
+		sendJSONError(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	rows, err := db.Query("SELECT DISTINCT r.name FROM recipes r JOIN recipe_ingredients ri ON r.id = ri.recipe_id WHERE ri.catalog_id = ? LIMIT 3", idStr)
+	if err != nil {
+		sendJSONError(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var recipeNames []string
+	for rows.Next() {
+		var name string
+		rows.Scan(&name)
+		recipeNames = append(recipeNames, name)
+	}
+
+	response := map[string]interface{}{
+		"recipe_count": recipeCount,
+		"recipe_names": recipeNames,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
 }
 
 func getCatalogItems(w http.ResponseWriter, _ *http.Request) {
@@ -239,9 +833,6 @@ func addCatalogItems(w http.ResponseWriter, r *http.Request) {
 			item.Category = ""
 			item.DefaultUnit = "g"
 		}
-
-		// ★修正箇所: レシピからの自動登録時の単位上書きを防ぐため、空に設定
-		// ユーザーの指示（単位不要）を反映
 		item.DefaultUnit = ""
 
 		_, err := stmt.Exec(item.Name, item.Kana, item.Classification, item.Category, item.DefaultUnit)
@@ -653,7 +1244,7 @@ func getIngredients(w http.ResponseWriter, _ *http.Request) {
 		ORDER BY 
 			CASE WHEN l.priority IS NULL THEN 9999 ELSE l.priority END ASC,
 			c.kana ASC,
-			c.name ASC;
+			c.name ASC LIMIT 100;
 	`
 	rows, err := db.Query(query)
 	if err != nil {
@@ -986,15 +1577,18 @@ func sendMissingIngredientsError(w http.ResponseWriter, items []string) {
 }
 
 func getRecipes(w http.ResponseWriter, r *http.Request) {
+	// 検索フィルタがある場合とない場合でクエリを分岐（ここは既存と同じ）
 	filterIngredientID := r.URL.Query().Get("ingredient_id")
 
 	var rows *sql.Rows
 	var err error
 	if filterIngredientID != "" {
-		query := `SELECT r.id, r.name, r.yield, r.process, r.url, r.created_at FROM recipes r JOIN recipe_ingredients ri ON r.id = ri.recipe_id WHERE ri.catalog_id = ? ORDER BY r.created_at DESC`
+		// 検索時もLIMITをつけるのが安全
+		query := `SELECT r.id, r.name, r.yield, r.process, r.url, r.created_at FROM recipes r JOIN recipe_ingredients ri ON r.id = ri.recipe_id WHERE ri.catalog_id = ? ORDER BY r.created_at DESC LIMIT 50`
 		rows, err = db.Query(query, filterIngredientID)
 	} else {
-		query := `SELECT id, name, yield, process, url, created_at FROM recipes ORDER BY created_at DESC`
+		// 通常時
+		query := `SELECT id, name, yield, process, url, created_at FROM recipes ORDER BY created_at DESC LIMIT 50`
 		rows, err = db.Query(query)
 	}
 	if err != nil {
@@ -1014,6 +1608,55 @@ func getRecipes(w http.ResponseWriter, r *http.Request) {
 		recipes = append(recipes, r)
 	}
 
+	// 取得件数が0ならここで終了
+	if len(recipes) == 0 {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(recipes)
+		return
+	}
+
+	// --- 高速化ポイント：材料データを一括取得 ---
+
+	// 1. レシピIDのリストを作る
+	recipeIDs := make([]interface{}, len(recipes))
+	placeholders := make([]string, len(recipes))
+	for i, r := range recipes {
+		recipeIDs[i] = r.ID
+		placeholders[i] = "?"
+	}
+
+	// 2. IN句を使って、関連する材料を一撃で取得する
+	// "SELECT ... WHERE recipe_id IN (?, ?, ?, ...)"
+	queryIng := fmt.Sprintf(`
+		SELECT ri.recipe_id, ri.catalog_id, c.classification 
+		FROM recipe_ingredients ri 
+		JOIN item_catalog c ON ri.catalog_id = c.id 
+		WHERE ri.recipe_id IN (%s)
+	`, strings.Join(placeholders, ","))
+
+	rowsIng, err := db.Query(queryIng, recipeIDs...)
+	if err != nil {
+		sendJSONError(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer rowsIng.Close()
+
+	// 3. メモリ上で「レシピID -> 材料リスト」の対応表を作る
+	type IngInfo struct {
+		CatalogID      int
+		Classification string
+	}
+	recipeIngMap := make(map[int][]IngInfo)
+
+	for rowsIng.Next() {
+		var rID, cID int
+		var cls string
+		if err := rowsIng.Scan(&rID, &cID, &cls); err == nil {
+			recipeIngMap[rID] = append(recipeIngMap[rID], IngInfo{CatalogID: cID, Classification: cls})
+		}
+	}
+
+	// --- 在庫情報の取得 (これは1回で済むのでそのままでOK) ---
 	invMap := make(map[int]bool)
 	rowsInv, _ := db.Query("SELECT catalog_id FROM refrigerator_ingredients")
 	if rowsInv != nil {
@@ -1036,28 +1679,24 @@ func getRecipes(w http.ResponseWriter, r *http.Request) {
 		rowsSeas.Close()
 	}
 
+	// --- 判定ロジック (メモリ上のマップを見るだけなので爆速) ---
 	for i := range recipes {
 		hasIng := true
 		hasSeas := true
 
-		ingRows, err := db.Query("SELECT ri.catalog_id, c.classification FROM recipe_ingredients ri JOIN item_catalog c ON ri.catalog_id = c.id WHERE ri.recipe_id = ?", recipes[i].ID)
-		if err == nil {
-			for ingRows.Next() {
-				var cid int
-				var cls string
-				ingRows.Scan(&cid, &cls)
+		// DBアクセスではなく、さっき作ったマップを見る
+		ingredients := recipeIngMap[recipes[i].ID]
 
-				if cls == "調味料" {
-					if !seasMap[cid] {
-						hasSeas = false
-					}
-				} else {
-					if !invMap[cid] {
-						hasIng = false
-					}
+		for _, ing := range ingredients {
+			if ing.Classification == "調味料" {
+				if !seasMap[ing.CatalogID] {
+					hasSeas = false
+				}
+			} else {
+				if !invMap[ing.CatalogID] {
+					hasIng = false
 				}
 			}
-			ingRows.Close()
 		}
 		recipes[i].HasIngredients = hasIng
 		recipes[i].HasSeasonings = hasSeas
@@ -1318,8 +1957,8 @@ func getSeasonings(w http.ResponseWriter, _ *http.Request) {
 			c.name, c.classification, c.category
 		FROM refrigerator_seasonings s
 		JOIN item_catalog c ON s.catalog_id = c.id
-		ORDER BY c.name ASC;
-	`
+		ORDER BY c.kana ASC, c.name ASC; 
+` // ★修正: kana順を優先
 	rows, err := db.Query(query)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -1424,7 +2063,14 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	DataDir = currentDir
+
+	// ★変更: "data" フォルダの中に保存するように書き換える
+	DataDir = filepath.Join(currentDir, "data")
+
+	// ★追加: dataフォルダがなければ作る
+	if err := os.MkdirAll(DataDir, 0755); err != nil {
+		log.Fatal(err)
+	}
 
 	imagesPath := filepath.Join(DataDir, "images")
 	if err := os.MkdirAll(imagesPath, 0755); err != nil {
@@ -1445,6 +2091,7 @@ func main() {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/api/catalog", handleCatalog)
+	mux.HandleFunc("/api/catalog/usage", handleCatalogUsage) // 追加
 	mux.HandleFunc("/api/catalog/export", exportCatalogCSV)
 	mux.HandleFunc("/api/ingredients", handleIngredients)
 	mux.HandleFunc("/api/seasonings", handleSeasonings)
@@ -1461,9 +2108,27 @@ func main() {
 	mux.Handle("/", http.FileServer(http.FS(staticFS)))
 
 	fmt.Println("Server is running at http://localhost:8080")
-	if err := http.ListenAndServe(":8080", mux); err != nil {
+	if err := http.ListenAndServe(":8080", basicAuth(mux)); err != nil {
 		log.Fatal(err)
 	}
+}
+
+// Basic認証を行うミドルウェア
+func basicAuth(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// ▼▼ ここでIDとパスワードを決めます ▼▼
+		const expectedUser = "wasabi"
+		const expectedPass = "karashi"
+		// ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
+
+		user, pass, ok := r.BasicAuth()
+		if !ok || user != expectedUser || pass != expectedPass {
+			w.Header().Set("WWW-Authenticate", `Basic realm="Restricted"`)
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 

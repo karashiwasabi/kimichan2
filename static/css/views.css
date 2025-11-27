@@ -1,10 +1,75 @@
-/* 冷蔵庫スナップショットエリア */
+/* --- レイアウト調整 --- */
+.search-area {
+    margin-bottom: 5px; /* 上部余白を削減 */
+}
+
+#inventory-list {
+    margin-top: 0;
+    padding-top: 0;
+}
+
+/* --- 在庫リスト表示用 --- */
+
+/* 場所ヘッダー */
+.loc-header-badge {
+    /* 既存のスタイルがあればそれを維持、なければ以下などを定義 */
+    background-color: #eee;
+    color: #333;
+    padding: 5px 10px;
+    border-radius: 4px;
+    font-weight: bold;
+    font-size: 14px;
+    margin-top: 15px; /* JSから移動 */
+}
+
+/* 在庫なしメッセージ */
+.inventory-empty-msg {
+    font-size: 12px;
+    color: #ccc;
+    padding: 10px;
+    text-align: center;
+}
+
+/* 期限表示の色分けクラス */
+.date-tag {
+    font-weight: bold;
+}
+.status-expired {
+    color: #e74c3c; /* 赤 */
+}
+.status-soon {
+    color: #3498db; /* 青 */
+}
+.status-normal {
+    color: #333; /* 黒 */
+}
+
+/* 在庫数表示 */
+.stock-status-ok {
+    color: #27ae60;
+    font-weight: bold;
+}
+
+/* レシピバッジ */
+.recipe-badge-btn {
+    background: #e67e22;
+    color: white;
+    padding: 4px 10px;
+    border-radius: 20px;
+    font-size: 11px;
+    font-weight: bold;
+    margin-left: 10px;
+    cursor: pointer;
+    display: inline-block;
+}
+
+/* --- 写真エリア (前回の内容含む) --- */
 .fridge-snapshot-area {
     display: flex;
     overflow-x: auto;
     gap: 10px;
     padding-bottom: 5px;
-    margin-bottom: 15px;
+    margin-bottom: 10px;
     margin-top: 5px;
     border-bottom: 1px dashed #eee;
     min-height: 110px;
@@ -14,7 +79,7 @@
 }
 
 .snapshot-card {
-    flex: 0 0 133px; /* 4:3比率基準: 高さ100pxなら幅133px */
+    flex: 0 0 133px; /* 4:3比率 */
     height: 100px;
     position: relative;
     border-radius: 12px;
@@ -68,7 +133,7 @@
     z-index: 10;
 }
 
-/* モーダルでの写真拡大 */
+/* モーダル画像プレビュー */
 .modal-image-view {
     width: 100%;
     height: auto;
@@ -76,7 +141,7 @@
     object-fit: contain;
 }
 
-/* カタログ画面用 */
+/* --- その他の既存スタイル (Catalog, Recipe等) --- */
 .category-wrapper {
     display: flex;
     align-items: center;
@@ -126,8 +191,6 @@
     border-color: var(--primary-color);
     font-weight: bold;
 }
-
-/* レシピ画面用 */
 .recipe-group-header {
     background: #fff3e0;
     color: #e67e22;

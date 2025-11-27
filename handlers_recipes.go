@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
 )
 
@@ -52,23 +53,37 @@ func sendMissingIngredientsError(w http.ResponseWriter, items []string) {
 }
 
 func getRecipes(w http.ResponseWriter, r *http.Request) {
+	// 検索フィルタ
 	filterIngredientID := r.URL.Query().Get("ingredient_id")
+	// ★追加: 全件取得フラグ
+	isAll := r.URL.Query().Get("all") == "true"
 
-	var rows *sql.Rows
-	var err error
+	var query string
+	var args []interface{}
+
+	// 基本のクエリ (ORDER BYまで)
 	if filterIngredientID != "" {
-		query := `SELECT r.id, r.name, r.yield, r.process, r.url, r.created_at FROM recipes r JOIN recipe_ingredients ri ON r.id = ri.recipe_id WHERE ri.catalog_id = ? ORDER BY r.created_at DESC`
-		rows, err = db.Query(query, filterIngredientID)
+		query = `SELECT r.id, r.name, r.yield, r.process, r.url, r.created_at FROM recipes r JOIN recipe_ingredients ri ON r.id = ri.recipe_id WHERE ri.catalog_id = ? ORDER BY r.created_at DESC`
+		args = append(args, filterIngredientID)
 	} else {
-		query := `SELECT id, name, yield, process, url, created_at FROM recipes ORDER BY created_at DESC`
-		rows, err = db.Query(query)
+		query = `SELECT id, name, yield, process, url, created_at FROM recipes ORDER BY created_at DESC`
 	}
+
+	// ★変更: クラウド(Cloud Run)上で、かつ合言葉がない時だけ制限をかける
+	// ローカル(PC)なら制限なしで全件表示
+	isCloud := os.Getenv("K_SERVICE") != "" // Cloud Runにはこの変数が自動である
+	if isCloud && !isAll {
+		query += " LIMIT 50"
+	}
+
+	rows, err := db.Query(query, args...)
 	if err != nil {
 		sendJSONError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	defer rows.Close()
 
+	// --- (以下、変更なし) ---
 	recipes := []RecipeResponse{}
 	for rows.Next() {
 		var r RecipeResponse
@@ -80,6 +95,49 @@ func getRecipes(w http.ResponseWriter, r *http.Request) {
 		recipes = append(recipes, r)
 	}
 
+	if len(recipes) == 0 {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(recipes)
+		return
+	}
+
+	// --- 材料の一括取得 (高速化ロジック) ---
+	recipeIDs := make([]interface{}, len(recipes))
+	placeholders := make([]string, len(recipes))
+	for i, r := range recipes {
+		recipeIDs[i] = r.ID
+		placeholders[i] = "?"
+	}
+
+	queryIng := fmt.Sprintf(`
+		SELECT ri.recipe_id, ri.catalog_id, c.classification 
+		FROM recipe_ingredients ri 
+		JOIN item_catalog c ON ri.catalog_id = c.id 
+		WHERE ri.recipe_id IN (%s)
+	`, strings.Join(placeholders, ","))
+
+	rowsIng, err := db.Query(queryIng, recipeIDs...)
+	if err != nil {
+		sendJSONError(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer rowsIng.Close()
+
+	type IngInfo struct {
+		CatalogID      int
+		Classification string
+	}
+	recipeIngMap := make(map[int][]IngInfo)
+
+	for rowsIng.Next() {
+		var rID, cID int
+		var cls string
+		if err := rowsIng.Scan(&rID, &cID, &cls); err == nil {
+			recipeIngMap[rID] = append(recipeIngMap[rID], IngInfo{CatalogID: cID, Classification: cls})
+		}
+	}
+
+	// 在庫・調味料マップの作成
 	invMap := make(map[int]bool)
 	rowsInv, _ := db.Query("SELECT catalog_id FROM refrigerator_ingredients")
 	if rowsInv != nil {
@@ -102,28 +160,22 @@ func getRecipes(w http.ResponseWriter, r *http.Request) {
 		rowsSeas.Close()
 	}
 
+	// 判定
 	for i := range recipes {
 		hasIng := true
 		hasSeas := true
+		ingredients := recipeIngMap[recipes[i].ID]
 
-		ingRows, err := db.Query("SELECT ri.catalog_id, c.classification FROM recipe_ingredients ri JOIN item_catalog c ON ri.catalog_id = c.id WHERE ri.recipe_id = ?", recipes[i].ID)
-		if err == nil {
-			for ingRows.Next() {
-				var cid int
-				var cls string
-				ingRows.Scan(&cid, &cls)
-
-				if cls == "調味料" {
-					if !seasMap[cid] {
-						hasSeas = false
-					}
-				} else {
-					if !invMap[cid] {
-						hasIng = false
-					}
+		for _, ing := range ingredients {
+			if ing.Classification == "調味料" {
+				if !seasMap[ing.CatalogID] {
+					hasSeas = false
+				}
+			} else {
+				if !invMap[ing.CatalogID] {
+					hasIng = false
 				}
 			}
-			ingRows.Close()
 		}
 		recipes[i].HasIngredients = hasIng
 		recipes[i].HasSeasonings = hasSeas

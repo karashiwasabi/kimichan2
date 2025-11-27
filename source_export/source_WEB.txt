@@ -597,9 +597,18 @@ header {
 }
 
 ----- C:\Users\wasab\OneDrive\デスクトップ\kimichan2\static\views\catalog_view.html -----
-<div style="display:flex; justify-content:flex-end; margin-bottom:10px;">
-    <a href="/api/catalog/export" class="btn" style="padding:6px 12px; font-size:11px; background:#eee; color:#666;">
-        📥 CSV出力
+<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+    <div style="display:flex; gap:10px; align-items:center;">
+        <select id="sort-order" class="input-field" style="width:auto; padding:6px 12px; font-size:12px;">
+            <option value="id_desc">新着順 (ID降順)</option>
+            <option value="kana_asc">50音順</option>
+        </select>
+        <label style="font-size:12px; display:flex; align-items:center; cursor:pointer;">
+            <input type="checkbox" id="filter-no-kana" style="margin-right:4px;"> よみがな未登録
+        </label>
+    </div>
+    <a href="/api/catalog/export" class="btn" style="padding:6px 12px; font-size:11px; background:#eee; color:#666; text-decoration:none; border-radius:4px;">
+        📥 CSV
     </a>
 </div>
 
@@ -626,13 +635,25 @@ header {
         <div class="modal-scroll-area">
             <input type="hidden" id="edit-id">
             <input type="hidden" id="original-unit">
-
-            <div class="tab-group" style="margin-bottom:15px;">
+            <input type="hidden" id="original-name"> <div class="tab-group" style="margin-bottom:15px;">
                 <button type="button" id="tab-single" class="tab-btn active">個別入力</button>
                 <button type="button" id="tab-csv" class="tab-btn">一括登録</button>
             </div>
 
             <div id="form-single">
+                
+                <div class="form-group">
+                    <label class="label">食材名 (入力すると下に類似候補が出ます)</label>
+                    <input type="text" id="input-name" class="input-field" placeholder="例: キャベツ">
+                </div>
+
+                <div id="reference-area" style="display:none; background:#f0f8ff; padding:10px; border-radius:8px; margin-bottom:15px; border:1px solid #dbeafe;">
+                    <div style="font-size:11px; font-weight:bold; color:#4a90e2; margin-bottom:5px;">
+                        💡 類似・参考アイテム (クリックで分類・カテゴリをコピー)
+                    </div>
+                    <div id="reference-list" style="display:flex; flex-wrap:wrap; gap:5px;"></div>
+                </div>
+
                 <div class="form-group">
                     <label class="label">分類</label>
                     <select id="input-classification" class="input-field">
@@ -649,10 +670,7 @@ header {
                          <input type="text" id="input-category" class="input-field" style="flex:1;" placeholder="新規カテゴリ名">
                     </div>
                 </div>
-                <div class="form-group">
-                    <label class="label">食材名</label>
-                    <input type="text" id="input-name" class="input-field" placeholder="例: キャベツ">
-                </div>
+
                 <div class="form-group">
                     <label class="label">よみがな (任意)</label>
                     <input type="text" id="input-kana" class="input-field" placeholder="例: きゃべつ">
@@ -1213,7 +1231,9 @@ header {
         </a>
     </nav>
 
-    <script src="js/catalog.js"></script>
+    <script src="js/catalog_list.js"></script>
+    <script src="js/catalog_edit.js"></script>
+    
     <script src="js/inventory_locations.js"></script>
     <script src="js/inventory_photos.js"></script>
     <script src="js/inventory.js"></script>

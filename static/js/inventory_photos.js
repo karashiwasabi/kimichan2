@@ -66,12 +66,10 @@ window.deleteFridgePhoto = function(id, e) {
     if (!confirm('この写真を削除しますか？')) return;
     fetch(`/api/fridge_photos?id=${id}`, { method: 'DELETE' })
     .then(() => {
-        // 再取得と再描画は inventory.js 側で制御するため、イベント発行またはデータ更新のみ
         return window.fetchFridgePhotos();
     })
     .then(() => {
         if (typeof renderInventory === 'function') {
-             // インベントリ全体を再描画して写真も更新
              renderInventory(inventoryData);
         }
     });
@@ -83,32 +81,42 @@ window.setupPhotoUI = function() {
     const photoViewOverlay = document.getElementById('modal-photo-view');
 
     if (snapshotFile) {
-        snapshotFile.addEventListener('change', () => {
+        snapshotFile.addEventListener('change', async () => {
             const file = snapshotFile.files[0];
             if (!file) return;
-            const formData = new FormData();
-            formData.append('photo', file);
-            fetch('/api/upload', { method: 'POST', body: formData })
-            .then(res => res.json())
-            .then(data => {
-                if (data.status === 'success') {
-                    return fetch('/api/fridge_photos', {
-                        method: 'POST',
-                        headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({ 
-                            image_path: data.filename,
-                            location: uploadTargetLocation
-                        })
-                    });
-                }
-            })
-            .then(() => window.fetchFridgePhotos())
-            .then(() => {
-                if (typeof renderInventory === 'function') {
-                     renderInventory(inventoryData);
-                }
-            })
-            .catch(err => alert('アップロード失敗'));
+
+            // リサイズ処理 (最大800px, 品質0.7)
+            try {
+                const resizedBlob = await resizeImage(file, 800, 0.7);
+                
+                const formData = new FormData();
+                formData.append('photo', resizedBlob, file.name);
+
+                fetch('/api/upload', { method: 'POST', body: formData })
+                .then(res => res.json())
+                .then(data => {
+                    if (data.status === 'success') {
+                        return fetch('/api/fridge_photos', {
+                            method: 'POST',
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify({ 
+                                image_path: data.filename,
+                                location: uploadTargetLocation
+                            })
+                        });
+                    }
+                })
+                .then(() => window.fetchFridgePhotos())
+                .then(() => {
+                    if (typeof renderInventory === 'function') {
+                         renderInventory(inventoryData);
+                    }
+                })
+                .catch(err => alert('アップロード失敗: ' + err));
+            } catch(e) {
+                console.error(e);
+                alert('画像処理に失敗しました');
+            }
         });
     }
 
@@ -117,10 +125,43 @@ window.setupPhotoUI = function() {
         photoViewOverlay.addEventListener('click', () => photoViewOverlay.classList.remove('active'));
     }
     
-    // 各モーダル内の画像アップロード設定 (ここは変更なし)
+    // アイテム編集用などもリサイズ対応
     setupImageUpload('inv-file', 'inv-preview', 'inv-image-path');
     setupImageUpload('inv-edit-file', 'inv-edit-preview', 'inv-edit-image-path');
 };
+
+// 画像リサイズ関数
+function resizeImage(file, maxWidth, quality) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            const img = new Image();
+            img.onload = () => {
+                let width = img.width;
+                let height = img.height;
+
+                if (width > maxWidth) {
+                    height = Math.round(height * (maxWidth / width));
+                    width = maxWidth;
+                }
+
+                const canvas = document.createElement('canvas');
+                canvas.width = width;
+                canvas.height = height;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(img, 0, 0, width, height);
+
+                canvas.toBlob((blob) => {
+                    resolve(blob);
+                }, 'image/jpeg', quality);
+            };
+            img.onerror = reject;
+            img.src = e.target.result;
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+    });
+}
 
 function setupImageUpload(inputId, previewId, pathInputId) {
     const input = document.getElementById(inputId);
@@ -129,35 +170,43 @@ function setupImageUpload(inputId, previewId, pathInputId) {
 
     if(!input) return;
 
-    input.addEventListener('change', () => {
+    input.addEventListener('change', async () => {
         const file = input.files[0];
         if (!file) return;
 
-        const formData = new FormData();
-        formData.append('photo', file);
+        try {
+            // サムネイル用は小さめでOK
+            const resizedBlob = await resizeImage(file, 600, 0.7);
 
-        const reader = new FileReader();
-        reader.onload = (e) => {
-            preview.src = e.target.result;
-            preview.classList.add('active');
-        };
-        reader.readAsDataURL(file);
+            const formData = new FormData();
+            formData.append('photo', resizedBlob, file.name);
 
-        fetch('/api/upload', {
-            method: 'POST',
-            body: formData
-        })
-        .then(res => res.json())
-        .then(data => {
-            if (data.status === 'success') {
-                pathInput.value = data.filename;
-            } else {
-                alert('画像のアップロードに失敗しました');
-            }
-        })
-        .catch(err => {
-            console.error(err);
-            alert('通信エラー');
-        });
+            // プレビュー表示
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                preview.src = e.target.result;
+                preview.classList.add('active');
+            };
+            reader.readAsDataURL(resizedBlob);
+
+            fetch('/api/upload', {
+                method: 'POST',
+                body: formData
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    pathInput.value = data.filename;
+                } else {
+                    alert('画像のアップロードに失敗しました');
+                }
+            })
+            .catch(err => {
+                console.error(err);
+                alert('通信エラー');
+            });
+        } catch(e) {
+            console.error(e);
+        }
     });
 }

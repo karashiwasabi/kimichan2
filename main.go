@@ -23,7 +23,14 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	DataDir = currentDir
+
+	// ★変更: "data" フォルダの中に保存するように書き換える
+	DataDir = filepath.Join(currentDir, "data")
+
+	// ★追加: dataフォルダがなければ作る
+	if err := os.MkdirAll(DataDir, 0755); err != nil {
+		log.Fatal(err)
+	}
 
 	imagesPath := filepath.Join(DataDir, "images")
 	if err := os.MkdirAll(imagesPath, 0755); err != nil {
@@ -61,7 +68,25 @@ func main() {
 	mux.Handle("/", http.FileServer(http.FS(staticFS)))
 
 	fmt.Println("Server is running at http://localhost:8080")
-	if err := http.ListenAndServe(":8080", mux); err != nil {
+	if err := http.ListenAndServe(":8080", basicAuth(mux)); err != nil {
 		log.Fatal(err)
 	}
+}
+
+// Basic認証を行うミドルウェア
+func basicAuth(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// ▼▼ ここでIDとパスワードを決めます ▼▼
+		const expectedUser = "wasabi"
+		const expectedPass = "karashi"
+		// ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
+
+		user, pass, ok := r.BasicAuth()
+		if !ok || user != expectedUser || pass != expectedPass {
+			w.Header().Set("WWW-Authenticate", `Basic realm="Restricted"`)
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
