@@ -4,7 +4,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const navItems = document.querySelectorAll('.nav-item');
 
     function loadView(viewName) {
-        // ナビゲーションの見た目を更新
         navItems.forEach(nav => {
             if (nav.dataset.view === viewName) {
                 nav.classList.add('active');
@@ -25,11 +24,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     initCatalog();
                 } else if (viewName === 'inventory' && typeof initInventory === 'function') {
                     initInventory();
-                } else if (viewName === 'seasoning' && typeof initSeasoning === 'function') {
-                    initSeasoning();
                 } else if (viewName === 'recipes' && typeof initRecipes === 'function') {
-                    initRecipes(); // 追加
+                    initRecipes();
                 }
+                // 調味料(seasoning)は削除
             })
             .catch(err => {
                 appContainer.innerHTML = '<p style="text-align:center; margin-top:50px;">読み込みエラー</p>';
@@ -45,18 +43,23 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 
-    // 初期表示
     loadView('inventory');
 });
 
 ----- C:\Users\wasab\OneDrive\デスクトップ\kimichan2\static\js\catalog_edit.js -----
-// --- UIセットアップ ---
+// catalog_list.js で定義した FIXED_CATEGORIES を参照したいが、
+// モジュール分割されていないため再定義して安全策を取ります
+// ★修正: ここから「調味料」を除外しました（食材用のリストとするため）
+const FIXED_CATEGORIES_EDIT = [
+    "野菜", "肉", "肉加工品", "魚介", "缶詰", "卵・乳製品", 
+    "大豆製品", "乾物・粉類", "麺類", "パン", "穀物", "その他"
+];
+
 function setupCatalogUI() {
     const fab = document.getElementById('fab-add');
     const overlay = document.getElementById('modal-overlay');
     const btnCancel = document.getElementById('btn-cancel');
     const btnSave = document.getElementById('btn-save');
-    // HTML側に追加が必要な削除ボタン
     const btnDelete = document.getElementById('btn-delete-catalog');
     
     const tabSingle = document.getElementById('tab-single');
@@ -68,33 +71,32 @@ function setupCatalogUI() {
     const sortSelect = document.getElementById('sort-order');
     const noKanaCheck = document.getElementById('filter-no-kana');
     const nameInput = document.getElementById('input-name');
-
-    const scrollLeft = document.getElementById('scroll-left');
-    const scrollRight = document.getElementById('scroll-right');
-    const scrollContainer = document.getElementById('category-filters');
-
-    // 横スクロール制御
-    if(scrollLeft && scrollContainer) {
-        scrollLeft.onclick = () => scrollContainer.scrollBy({ left: -100, behavior: 'smooth' });
-        scrollRight.onclick = () => scrollContainer.scrollBy({ left: 100, behavior: 'smooth' });
+    
+    // ★追加: 分類プルダウンの制御
+    const classSelect = document.getElementById('input-classification');
+    if (classSelect) {
+        classSelect.addEventListener('change', () => {
+            toggleCategorySelect(classSelect.value);
+        });
     }
 
     if (!fab) return;
 
-    // 新規登録ボタン
+    // 新規登録
     fab.addEventListener('click', () => {
         resetModal('アイテム登録');
         document.getElementById('edit-id').value = '';
-        document.getElementById('original-name').value = ''; // 新規なので空
-        
-        // 削除ボタンは新規登録時は隠す
+        document.getElementById('original-name').value = '';
         if(btnDelete) btnDelete.style.display = 'none';
-
-        // 現在のカテゴリを選択状態にする
-        // currentCategoryは catalog_list.js のグローバル変数想定
-        const currentCat = (typeof currentCategory !== 'undefined' && currentCategory !== 'すべて' && currentCategory !== '未分類') ? currentCategory : '';
-        updateCategorySelect(currentCat);
         
+        // デフォルトは食材
+        if(classSelect) {
+            classSelect.value = '食材';
+            toggleCategorySelect('食材');
+        }
+
+        // カテゴリプルダウンを初期化
+        updateCategorySelectEdit('');
         overlay.classList.add('active');
     });
 
@@ -103,7 +105,6 @@ function setupCatalogUI() {
         removeConflictUI();
     });
 
-    // 削除ボタンイベント
     if (btnDelete) {
         btnDelete.addEventListener('click', () => {
             const id = document.getElementById('edit-id').value;
@@ -112,23 +113,19 @@ function setupCatalogUI() {
         });
     }
 
-    // リスト側のフィルタ関数を呼び出すイベント
     if (typeof filterAndRender === 'function') {
         searchInput.addEventListener('input', filterAndRender);
         sortSelect.addEventListener('change', filterAndRender);
         noKanaCheck.addEventListener('change', filterAndRender);
     }
 
-    // 名前入力時の類似検索
     nameInput.addEventListener('input', (e) => {
         updateReferenceList(e.target.value);
     });
 
-    // タブ切り替え
     tabSingle.addEventListener('click', () => switchTab('single'));
     tabCsv.addEventListener('click', () => switchTab('csv'));
 
-    // 保存実行
     btnSave.addEventListener('click', () => {
         if (singleContainer.style.display !== 'none') {
             saveSingleItem();
@@ -138,7 +135,19 @@ function setupCatalogUI() {
     });
 }
 
-// --- モーダル制御・ヘルパー ---
+// --- ヘルパー関数 ---
+
+// ★追加: 分類によってカテゴリ欄の表示/非表示を切り替える
+function toggleCategorySelect(classification) {
+    const group = document.getElementById('form-group-category'); // HTML側でID付与が必要
+    if (!group) return;
+
+    if (classification === '調味料') {
+        group.style.display = 'none';
+    } else {
+        group.style.display = 'block';
+    }
+}
 
 function switchTab(mode) {
     const tabSingle = document.getElementById('tab-single');
@@ -175,41 +184,37 @@ function resetModal(titleText) {
 
 async function openCatalogEditModal(item) {
     resetModal('アイテム編集');
-    
     const overlay = document.getElementById('modal-overlay');
     const btnDelete = document.getElementById('btn-delete-catalog');
     
     document.getElementById('edit-id').value = item.id;
     document.getElementById('original-unit').value = item.default_unit || '';
     document.getElementById('original-name').value = item.name || ''; 
-
-    document.getElementById('input-classification').value = item.classification;
-    updateCategorySelect(item.category);
+    
+    const classSelect = document.getElementById('input-classification');
+    classSelect.value = item.classification;
+    // ★表示切り替え実行
+    toggleCategorySelect(item.classification);
 
     document.getElementById('input-name').value = item.name;
     document.getElementById('input-kana').value = item.kana || '';
     document.getElementById('input-unit').value = item.default_unit;
 
-    // ★削除ボタンの制御 (使用状況チェック)
+    // カテゴリプルダウンをセット
+    updateCategorySelectEdit(item.category);
+
     if (btnDelete) {
-        btnDelete.style.display = 'none'; // 一旦隠す
+        btnDelete.style.display = 'none';
         try {
             const res = await fetch(`/api/catalog/usage?id=${item.id}`);
             const usage = await res.json();
-            
-            // レシピに使われていなければ削除ボタンを表示
             if (usage.recipe_count === 0) {
                 btnDelete.style.display = 'inline-block';
             }
-        } catch(e) {
-            console.error('Usage check failed:', e);
-        }
+        } catch(e) { console.error(e); }
     }
 
-    if (item.name) {
-        updateReferenceList(item.name);
-    }
-
+    if (item.name) updateReferenceList(item.name);
     overlay.classList.add('active');
 }
 
@@ -223,71 +228,45 @@ function removeConflictUI() {
     }
 }
 
-function updateCategorySelect(selectedCategory) {
+// 固定リストを使ってプルダウンを作る
+function updateCategorySelectEdit(selectedCategory) {
     const select = document.getElementById('select-category');
-    const input = document.getElementById('input-category');
     
-    // catalogDataは catalog_list.js で定義されたグローバル変数
-    const categories = new Set();
-    if (typeof catalogData !== 'undefined') {
-        catalogData.forEach(d => {
-            if(d.category) categories.add(d.category);
-        });
-    }
+    // 手入力欄は廃止（HTMLに残っていても非表示にする）
+    const input = document.getElementById('input-category');
+    if(input) input.style.display = 'none'; 
 
-    select.innerHTML = '<option value="">(新規入力)</option>';
-    categories.forEach(c => {
+    select.innerHTML = '';
+    // 固定リストを展開
+    FIXED_CATEGORIES_EDIT.forEach(c => {
         const opt = document.createElement('option');
         opt.value = c;
         opt.textContent = c;
         select.appendChild(opt);
     });
 
-    if (categories.has(selectedCategory)) {
+    // 選択
+    if (selectedCategory && FIXED_CATEGORIES_EDIT.includes(selectedCategory)) {
         select.value = selectedCategory;
-        input.style.display = 'none';
-        input.value = selectedCategory;
     } else {
-        select.value = "";
-        input.style.display = 'block';
-        input.value = selectedCategory || "";
+        select.value = "その他";
     }
-
-    select.onchange = () => {
-        if (select.value === "") {
-            input.style.display = 'block';
-            input.value = "";
-        } else {
-            input.style.display = 'none';
-            input.value = select.value;
-        }
-    };
 }
-
-// --- 類似・参考機能 ---
 
 function updateReferenceList(name) {
     const refArea = document.getElementById('reference-area');
     const refList = document.getElementById('reference-list');
-    
-    if (!name || name.length < 1 || typeof catalogData === 'undefined') {
+    if (!name || name.length < 1) {
         refArea.style.display = 'none';
         return;
     }
-
+    if (typeof catalogData === 'undefined') return;
     const term = name.toLowerCase();
-    
-    // 双方向部分一致
     const hits = catalogData.filter(d => {
-        const targetName = d.name.toLowerCase();
-        const targetKana = d.kana ? d.kana.toLowerCase() : '';
-        
-        const dbContainsInput = targetName.includes(term) || (targetKana && targetKana.includes(term));
-        const inputContainsDb = term.includes(targetName) || (targetKana && term.includes(targetKana));
-
-        return dbContainsInput || inputContainsDb;
-    }).slice(0, 8); 
-
+        const n = d.name.toLowerCase();
+        const k = d.kana ? d.kana.toLowerCase() : '';
+        return n.includes(term) || k.includes(term) || term.includes(n);
+    }).slice(0, 8);
     if (hits.length === 0) {
         refArea.style.display = 'none';
         return;
@@ -296,11 +275,8 @@ function updateReferenceList(name) {
     refList.innerHTML = '';
     hits.forEach(hit => {
         const chip = document.createElement('div');
-        chip.style.cssText = 'background:white; border:1px solid #ccc; padding:4px 8px; border-radius:12px; font-size:11px; cursor:pointer; display:flex; align-items:center; gap:5px;';
-        chip.innerHTML = `
-            <span style="color:#888;">[${hit.classification}/${hit.category||'-'}]</span>
-            <strong>${hit.name}</strong>
-        `;
+        chip.className = 'preset-chip'; 
+        chip.innerHTML = `<strong>${hit.name}</strong>`;
         chip.onclick = () => applyReferenceItem(hit);
         refList.appendChild(chip);
     });
@@ -308,61 +284,46 @@ function updateReferenceList(name) {
 }
 
 function applyReferenceItem(item) {
-    if (!confirm(`この食材を「${item.name}」として設定（統合）しますか？\n\n※保存時に統合の確認が表示されます。`)) return;
-
+    if (!confirm(`この食材を「${item.name}」として設定（統合）しますか？`)) return;
     document.getElementById('input-name').value = item.name;
     document.getElementById('input-kana').value = item.kana || '';
     document.getElementById('input-classification').value = item.classification;
-    
-    updateCategorySelect(item.category);
+    toggleCategorySelect(item.classification); // ★表示切り替え
     document.getElementById('input-unit').value = item.default_unit || '';
+    updateCategorySelectEdit(item.category);
 }
-
-// --- 保存・削除処理 ---
 
 async function saveSingleItem() {
     const id = document.getElementById('edit-id').value;
     const name = document.getElementById('input-name').value;
-    const originalUnit = document.getElementById('original-unit').value;
     const originalName = document.getElementById('original-name').value;
-    const newUnit = document.getElementById('input-unit').value;
+    const classification = document.getElementById('input-classification').value;
+    
+    // ★修正: 調味料ならカテゴリも「調味料」、そうでなければプルダウンから取得
+    let category = '調味料';
+    if (classification !== '調味料') {
+        category = document.getElementById('select-category').value;
+    }
 
     if (!name) return alert('名前を入力してください');
 
-    // 影響範囲チェック
     if (id && name !== originalName) {
         try {
-            const usageRes = await fetch(`/api/catalog/usage?id=${id}`);
-            const usage = await usageRes.json();
-            
+            const res = await fetch(`/api/catalog/usage?id=${id}`);
+            const usage = await res.json();
             if (usage.recipe_count > 0) {
-                const examples = usage.recipe_names.join('、') + (usage.recipe_count > 3 ? '...' : '');
-                const msg = `⚠️ この食材は ${usage.recipe_count} 件のレシピで使用されています。\n` +
-                            `（使用例: ${examples}）\n\n` +
-                            `名前を「${originalName}」から「${name}」に変更すると、それらのレシピの表示も全て変わります。\n\n` +
-                            `変更してよろしいですか？`;
-                
-                if (!confirm(msg)) return;
+                 if (!confirm(`この食材は ${usage.recipe_count} 件のレシピで使用されています。\n名前を変更すると全てに影響します。よろしいですか？`)) return;
             }
-        } catch(e) {
-            console.error('Usage check failed', e);
-        }
-    }
-
-    // 単位変更チェック
-    if (id && originalUnit !== newUnit) {
-        if (!confirm(`単位が「${originalUnit || '(なし)'}」から「${newUnit || '(なし)'}」に変更されています。\n在庫の数値（例: 3個 → 3${newUnit}）の意味が変わってしまいますが、よろしいですか？`)) {
-            return;
-        }
+        } catch(e) {}
     }
 
     const item = {
         id: id ? parseInt(id) : 0,
-        classification: document.getElementById('input-classification').value,
-        category: document.getElementById('input-category').value,
+        classification: classification,
+        category: category,
         name: name,
         kana: document.getElementById('input-kana').value,
-        default_unit: newUnit,
+        default_unit: document.getElementById('input-unit').value,
         force_merge: false
     };
 
@@ -376,9 +337,8 @@ async function saveSingleItem() {
     })
     .then(async res => {
         const data = await res.json();
-        
         if (res.status === 409 && data.error_code === 'merge_confirmation_required') {
-            if (confirm(`${data.message}\n\n「OK」を押すとデータを統合します（元のデータは削除され、関連データは移動します）。`)) {
+             if (confirm(`${data.message}\n\n「OK」を押すとデータを統合します。`)) {
                 item.force_merge = true;
                 return fetch('/api/catalog', {
                     method: 'PUT',
@@ -389,13 +349,12 @@ async function saveSingleItem() {
                 throw new Error('キャンセルしました');
             }
         }
-
         if (!res.ok) throw new Error(data.error || 'Save failed');
         return data;
     })
     .then(() => {
         document.getElementById('modal-overlay').classList.remove('active');
-        if (typeof fetchCatalog === 'function') fetchCatalog(); // リスト更新
+        if (typeof fetchCatalog === 'function') fetchCatalog();
         alert('保存しました');
     })
     .catch(err => {
@@ -404,14 +363,10 @@ async function saveSingleItem() {
 }
 
 function deleteCatalogItem(id, name) {
-    if (!confirm(`本当に「${name}」をカタログから削除しますか？\n（この操作は取り消せません）`)) return;
-
+    if (!confirm(`本当に「${name}」を削除しますか？`)) return;
     fetch(`/api/catalog?id=${id}`, { method: 'DELETE' })
-    .then(res => {
-        if (!res.ok) {
-            // エラーハンドリング (API未実装など)
-            return res.text().then(text => { throw new Error(text || res.statusText) });
-        }
+    .then(async res => {
+        if (!res.ok) throw new Error(await res.text());
         return res.json();
     })
     .then(() => {
@@ -419,18 +374,13 @@ function deleteCatalogItem(id, name) {
         document.getElementById('modal-overlay').classList.remove('active');
         if (typeof fetchCatalog === 'function') fetchCatalog();
     })
-    .catch(err => {
-        console.error(err);
-        alert('削除できませんでした。\n(サーバー側で削除機能が許可されていない可能性があります)');
-    });
+    .catch(err => alert('削除エラー: ' + err.message));
 }
 
+// CSV一括登録
 function saveCsvItem() {
     const text = document.getElementById('input-csv-text').value;
-    const resultArea = document.getElementById('csv-result-area');
-    
     if (!text) return alert('CSVを入力してください');
-
     fetch('/import/catalog', {
         method: 'POST',
         headers: { 'Content-Type': 'text/plain' },
@@ -438,28 +388,20 @@ function saveCsvItem() {
     })
     .then(async res => {
         if (!res.ok) {
-             const errorData = await res.json().catch(() => ({ error: `サーバーエラー: ${res.status}` }));
-             throw new Error(errorData.error || `サーバーエラー: ${res.status}`);
+             const data = await res.json().catch(() => ({ error: res.statusText }));
+             throw new Error(data.error || res.statusText);
         }
         return res.json();
     })
     .then(result => {
-        resultArea.style.display = 'block';
-        resultArea.innerHTML = `
-            <h3>処理結果</h3>
-            <p>登録成功: <strong>${result.added}</strong> 件</p>
-            <p>重複スキップ: <strong>${result.skipped}</strong> 件</p>
+        const area = document.getElementById('csv-result-area');
+        area.style.display = 'block';
+        area.innerHTML = `
+            <p>成功: <strong>${result.added}</strong> / 重複: <strong>${result.skipped}</strong></p>
         `;
-
         if (result.errors && result.errors.length > 0) {
-            resultArea.innerHTML += `
-                <div style="color: red; margin-top:10px; border: 1px solid red; padding: 5px; border-radius: 4px;">
-                    <h4>エラー詳細:</h4>
-                    <ul>${result.errors.map(e => `<li>${e}</li>`).join('')}</ul>
-                </div>
-            `;
+            area.innerHTML += `<div style="color:red;font-size:11px;margin-top:5px;">${result.errors.join('<br>')}</div>`;
         }
-
         if (typeof fetchCatalog === 'function') fetchCatalog();
         document.getElementById('input-csv-text').value = '';
     })
@@ -469,12 +411,15 @@ function saveCsvItem() {
 ----- C:\Users\wasab\OneDrive\デスクトップ\kimichan2\static\js\catalog_list.js -----
 // グローバル変数
 let catalogData = [];
-let currentCategory = 'すべて';
 
-// 初期化 (app.jsから呼ばれる)
+// ★修正: 固定カテゴリリストから「調味料」を削除
+const FIXED_CATEGORIES = [
+    "野菜", "肉", "肉加工品", "魚介", "缶詰", "卵・乳製品", 
+    "大豆製品", "乾物・粉類", "麺類", "パン", "穀物", "その他"
+];
+
 function initCatalog() {
     fetchCatalog();
-    // catalog_edit.js にあるセットアップ関数を呼ぶ
     if (typeof setupCatalogUI === 'function') {
         setupCatalogUI();
     }
@@ -486,38 +431,40 @@ function fetchCatalog() {
         .then(res => res.json())
         .then(data => {
             catalogData = data;
-            renderCategoryButtons(catalogData);
-            filterAndRender();
+            setupCategoryFilter(); 
+            filterAndRender();     
         })
         .catch(err => console.error('Fetch error:', err));
 }
 
-// カテゴリフィルタボタンの描画
-function renderCategoryButtons(items) {
-    const container = document.getElementById('category-filters');
-    if (!container) return;
+function setupCategoryFilter() {
+    const select = document.getElementById('catalog-category-filter');
+    const classSelect = document.getElementById('catalog-classification-filter'); // ★追加
 
-    const categories = new Set(['すべて']);
-    items.forEach(item => {
-        if (item.category) categories.add(item.category);
-        else if (item.classification === '調味料') categories.add('調味料');
-        else categories.add('未分類');
+    if (!select) return;
+
+    select.innerHTML = '<option value="すべて">すべてのカテゴリ</option>';
+
+    FIXED_CATEGORIES.forEach(cat => {
+        const opt = document.createElement('option');
+        opt.value = cat;
+        opt.textContent = cat;
+        select.appendChild(opt);
+    });
+    
+    // イベントリスナー
+    select.addEventListener('change', () => {
+        filterAndRender();
     });
 
-    container.innerHTML = '';
-    categories.forEach(cat => {
-        const displayCat = cat === '未分類' ? 'その他' : cat;
-        const btn = document.createElement('div');
-        btn.className = `cat-chip ${cat === currentCategory ? 'active' : ''}`;
-        btn.textContent = displayCat;
-        btn.onclick = () => {
-            currentCategory = cat;
-            document.querySelectorAll('.cat-chip').forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
+    // ★追加: 分類フィルタのイベント
+    if (classSelect) {
+        classSelect.addEventListener('change', () => {
+            // 分類で「調味料」を選んだら、カテゴリは意味をなさないのでリセットする等の挙動も可能だが
+            // ここではシンプルにフィルタ実行のみ行う
             filterAndRender();
-        };
-        container.appendChild(btn);
-    });
+        });
+    }
 }
 
 // フィルタリングとソートの実行
@@ -526,8 +473,12 @@ function filterAndRender() {
     const sortOrder = document.getElementById('sort-order').value;
     const filterNoKana = document.getElementById('filter-no-kana').checked;
     
-    let displayData = [...catalogData];
+    // プルダウンの値を取得
+    const selectedCategory = document.getElementById('catalog-category-filter').value;
+    const selectedClassification = document.getElementById('catalog-classification-filter').value; // ★追加
     
+    let displayData = [...catalogData];
+
     // ソート処理
     if (sortOrder === 'id_desc') {
         displayData.sort((a, b) => b.id - a.id);
@@ -541,11 +492,18 @@ function filterAndRender() {
 
     // フィルタ処理
     const filtered = displayData.filter(item => {
-        // カテゴリ
+        // ★追加: 分類フィルタ
+        let classMatch = true;
+        if (selectedClassification !== 'すべて') {
+            classMatch = (item.classification === selectedClassification);
+        }
+
+        // カテゴリフィルタ
         let catMatch = true;
-        if (currentCategory !== 'すべて') {
-            const itemCat = item.category || (item.classification === '調味料' ? '調味料' : '未分類');
-            catMatch = (itemCat === currentCategory);
+        if (selectedCategory !== 'すべて') {
+            // アイテムのカテゴリが空なら「その他」
+            const itemCat = item.category || 'その他';
+            catMatch = (itemCat === selectedCategory);
         }
 
         // 検索語句
@@ -553,8 +511,7 @@ function filterAndRender() {
         if (term) {
             termMatch = 
                 item.name.toLowerCase().includes(term) || 
-                (item.kana && item.kana.toLowerCase().includes(term)) ||
-                (item.category && item.category.toLowerCase().includes(term));
+                (item.kana && item.kana.toLowerCase().includes(term));
         }
 
         // よみがな未登録
@@ -563,7 +520,7 @@ function filterAndRender() {
             noKanaMatch = !item.kana || item.kana.trim() === '';
         }
 
-        return catMatch && termMatch && noKanaMatch;
+        return classMatch && catMatch && termMatch && noKanaMatch;
     });
 
     renderCatalog(filtered);
@@ -575,7 +532,6 @@ function renderCatalog(items) {
     if (!listEl) return;
     
     listEl.innerHTML = '';
-    
     if (items.length === 0) {
         listEl.innerHTML = '<div style="text-align:center; padding:20px; color:#999;">該当なし</div>';
         return;
@@ -584,14 +540,19 @@ function renderCatalog(items) {
     items.forEach(item => {
         const div = document.createElement('div');
         div.className = 'card';
-        // catalog_edit.js の関数を呼ぶ
         div.onclick = () => {
             if (typeof openCatalogEditModal === 'function') {
                 openCatalogEditModal(item);
             }
         };
         
-        const tagText = `${item.classification} / ${item.category || (item.classification === '調味料' ? 'スパイス等' : '未分類')}`;
+        // 表示用タグ: 分類が調味料なら「調味料」のみ表示、食材なら「食材 / カテゴリ」
+        let tagText = "";
+        if (item.classification === '調味料') {
+            tagText = "調味料";
+        } else {
+            tagText = `${item.classification} / ${item.category || '未分類'}`;
+        }
         
         const kanaHtml = item.kana 
             ? `<span style="font-size:11px; color:#999; font-weight:normal; margin-left:5px;">(${item.kana})</span>` 
@@ -1090,9 +1051,10 @@ function saveCsvItem() {
 }
 
 ----- C:\Users\wasab\OneDrive\デスクトップ\kimichan2\static\js\inventory_edit.js -----
-let catalogListForInv = [];
-let currentSelectorCategory = 'すべて';
-const FIXED_LOCATIONS_EDIT = ["冷蔵室", "チルド", "冷凍室", "野菜室", "その他"];
+var catalogListForInv = [];
+var currentSelectorCategory = 'すべて';
+// ★「ドアポケット」を追加
+var FIXED_LOCATIONS_EDIT = ["冷蔵室", "チルド", "冷凍室", "野菜室", "ドアポケット", "その他"];
 
 function initInventoryEdit() {
     setupLocationSelects();
@@ -1104,8 +1066,8 @@ function fetchCatalogForInv() {
     fetch('/api/catalog')
         .then(res => res.json())
         .then(data => {
-            // 調味料は除外
-            let filteredData = data.filter(item => item.classification !== '調味料');
+            // ★修正: フィルタなし（調味料も含む）
+            let filteredData = data;
             filteredData.sort((a, b) => {
                 const ka = a.kana || a.name;
                 const kb = b.kana || b.name;
@@ -1134,16 +1096,23 @@ function setupLocationSelects() {
 }
 
 function setupEditEventListeners() {
-    // --- モーダルを開く (新規) ---
     const fab = document.getElementById('fab-add-inventory');
+    const overlay = document.getElementById('modal-inventory');
+    const editOverlay = document.getElementById('modal-inv-edit');
+    const btnCancel = document.getElementById('btn-inv-cancel');
+    const btnSave = document.getElementById('btn-inv-save');
+    const btnEditCancel = document.getElementById('btn-inv-edit-cancel');
+    const btnUpdate = document.getElementById('btn-inv-update');
+    const btnDelete = document.getElementById('btn-inv-delete');
+
     if (fab) {
         fab.onclick = () => {
-            // リセット処理
             document.getElementById('inv-detail-toggle').checked = false;
             document.getElementById('inv-detail-area').style.display = 'none';
             document.getElementById('inv-amount').value = 1; 
-            document.getElementById('inv-unit').value = "";
-            document.getElementById('inv-select-catalog-id').value = ""; // IDリセット
+            
+            const idInput = document.getElementById('inv-select-catalog-id');
+            if(idInput) idInput.value = "";
             
             const btn = document.getElementById('btn-open-selector');
             if(btn) {
@@ -1152,33 +1121,26 @@ function setupEditEventListeners() {
                 btn.style.color = '#333';
             }
             setupLocationSelects();
-            document.getElementById('modal-inventory').classList.add('active');
+            overlay.classList.add('active');
         };
     }
 
-    // キャンセルボタン
-    const btnCancel = document.getElementById('btn-inv-cancel');
-    if (btnCancel) btnCancel.onclick = () => document.getElementById('modal-inventory').classList.remove('active');
-    
-    const btnEditCancel = document.getElementById('btn-inv-edit-cancel');
-    if (btnEditCancel) btnEditCancel.onclick = () => document.getElementById('modal-inv-edit').classList.remove('active');
+    if (btnCancel) btnCancel.onclick = () => overlay.classList.remove('active');
+    if (btnEditCancel) btnEditCancel.onclick = () => editOverlay.classList.remove('active');
 
-    // --- 保存ボタン (ここが重要！) ---
-    const btnSave = document.getElementById('btn-inv-save');
     if (btnSave) {
         btnSave.onclick = () => {
-            // IDを取得
             const idInput = document.getElementById('inv-select-catalog-id');
             const val = idInput ? idInput.value : "";
             
             if (!val) {
-                alert('食材が選択されていません。「食材を選択してください」ボタンを押して選んでください。');
+                alert('食材を選択してください');
                 return;
             }
             
             const catalogId = parseInt(val, 10);
             if (isNaN(catalogId)) {
-                alert('食材IDが不正です。もう一度選び直してください。');
+                alert('IDエラー');
                 return;
             }
 
@@ -1201,28 +1163,21 @@ function setupEditEventListeners() {
                 location: location
             };
 
+            // 在庫テーブルへ保存
             fetch('/api/ingredients', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify(data)
             })
             .then(async res => {
-                if (!res.ok) {
-                    const txt = await res.text();
-                    throw new Error(txt || res.statusText);
-                }
-                document.getElementById('modal-inventory').classList.remove('active');
-                if(window.fetchInventory) window.fetchInventory(); // リスト更新
+                if (!res.ok) throw new Error(await res.text());
+                overlay.classList.remove('active');
+                if(window.fetchInventory) window.fetchInventory();
             })
-            .catch(err => {
-                console.error("Save Error:", err);
-                alert('保存できませんでした: ' + err.message);
-            });
+            .catch(err => alert('保存エラー: ' + err));
         };
     }
 
-    // 更新
-    const btnUpdate = document.getElementById('btn-inv-update');
     if (btnUpdate) {
         btnUpdate.onclick = () => {
             const id = document.getElementById('inv-edit-id').value;
@@ -1243,14 +1198,12 @@ function setupEditEventListeners() {
                 body: JSON.stringify(data)
             }).then(async res => {
                 if(!res.ok) throw new Error(await res.text());
-                document.getElementById('modal-inv-edit').classList.remove('active');
+                editOverlay.classList.remove('active');
                 if(window.fetchInventory) window.fetchInventory();
             }).catch(err => alert('更新エラー: ' + err));
         };
     }
 
-    // 削除
-    const btnDelete = document.getElementById('btn-inv-delete');
     if (btnDelete) {
         btnDelete.onclick = () => {
             if(!confirm('削除しますか？')) return;
@@ -1258,7 +1211,7 @@ function setupEditEventListeners() {
             fetch(`/api/ingredients?id=${id}`, { method: 'DELETE' })
             .then(async res => {
                 if(!res.ok) throw new Error(await res.text());
-                document.getElementById('modal-inv-edit').classList.remove('active');
+                editOverlay.classList.remove('active');
                 if(window.fetchInventory) window.fetchInventory();
             }).catch(err => alert('削除エラー: ' + err));
         };
@@ -1267,14 +1220,13 @@ function setupEditEventListeners() {
     setupItemSelector();
 }
 
-// 選択モーダル UI制御
 function setupItemSelector() {
     const btnOpen = document.getElementById('btn-open-selector');
     const modal = document.getElementById('modal-item-selector');
     const btnClose = document.getElementById('btn-selector-close');
     const searchInput = document.getElementById('selector-search');
 
-    if(!btnOpen || !modal) return;
+    if(!btnOpen) return;
 
     btnOpen.onclick = () => {
         modal.classList.add('active');
@@ -1282,10 +1234,7 @@ function setupItemSelector() {
         renderSelectorList();
     };
     if(btnClose) btnClose.onclick = () => modal.classList.remove('active');
-    
-    if(searchInput) {
-        searchInput.oninput = () => renderSelectorList();
-    }
+    if(searchInput) searchInput.oninput = () => renderSelectorList();
 }
 
 function renderSelectorCategories() {
@@ -1332,17 +1281,16 @@ function renderSelectorList() {
     filtered.forEach(item => {
         const div = document.createElement('div');
         div.className = 'selector-item';
-        div.innerHTML = `${item.name} <span class="selector-item-kana">${item.kana || ''}</span>`;
+        // アイコン分け
+        const icon = item.classification === '調味料' ? '🧂' : '🥬';
+        div.innerHTML = `${icon} ${item.name} <span class="selector-item-kana">${item.kana || ''}</span>`;
         
-        // ★選択時の処理 (IDをセット)
         div.onclick = () => {
             document.getElementById('inv-select-catalog-id').value = item.id;
-            
             const btn = document.getElementById('btn-open-selector');
             btn.textContent = item.name;
             btn.style.fontWeight = 'bold';
             btn.style.color = '#000';
-            
             document.getElementById('inv-unit').value = item.default_unit || '';
             document.getElementById('modal-item-selector').classList.remove('active');
         };
@@ -1377,14 +1325,13 @@ window.addAmount = function(val) {
 };
 
 ----- C:\Users\wasab\OneDrive\デスクトップ\kimichan2\static\js\inventory_list.js -----
-let inventoryData = [];
-const FIXED_LOCATIONS = ["冷蔵室", "チルド", "冷凍室", "野菜室", "その他"];
+var inventoryData = [];
+// ★ドアポケット追加
+var FIXED_LOCATIONS = ["冷蔵室", "チルド", "冷凍室", "野菜室", "ドアポケット", "その他"];
 
 function initInventory() {
     if (window.fetchFridgePhotos) window.fetchFridgePhotos();
     fetchInventory();
-    
-    // 編集・写真UIの初期化
     if (typeof initInventoryEdit === 'function') initInventoryEdit();
     if (typeof setupPhotoUI === 'function') setupPhotoUI();
 }
@@ -1425,20 +1372,16 @@ function renderInventory(items) {
 
     FIXED_LOCATIONS.forEach(loc => {
         const locItems = itemsByLoc[loc] || [];
-
-        // ヘッダー
         const header = document.createElement('div');
         header.className = 'loc-header-badge';
         header.textContent = loc;
         listEl.appendChild(header);
 
-        // 写真エリア
         if (typeof window.renderLocationPhotos === 'function') {
             const photoStrip = window.renderLocationPhotos(loc);
             listEl.appendChild(photoStrip);
         }
 
-        // アイテム
         if (locItems.length === 0) {
             const emptyMsg = document.createElement('div');
             emptyMsg.className = 'inventory-empty-msg';
@@ -1449,11 +1392,8 @@ function renderInventory(items) {
                 const div = document.createElement('div');
                 div.className = 'card';
                 div.onclick = (e) => {
-                    // バッジ以外の場所をクリックしたら編集
                     if (!e.target.closest('.recipe-badge-btn')) {
-                        if (typeof openInventoryEdit === 'function') {
-                            openInventoryEdit(item);
-                        }
+                        if (typeof openInventoryEdit === 'function') openInventoryEdit(item);
                     }
                 };
             
@@ -1466,21 +1406,13 @@ function renderInventory(items) {
 
                 let dateClass = 'status-normal';
                 let dateText = item.expiration_date.split('T')[0];
-
-                if (diffDays < 0) {
-                    dateClass = 'status-expired';
-                    dateText += ' (期限切れ)';
-                } else if (diffDays <= 2) {
-                    dateClass = 'status-soon';
-                    if (diffDays === 0) dateText += ' (今日)';
-                    else dateText += ` (あと${diffDays}日)`;
-                }
+                if (diffDays < 0) { dateClass = 'status-expired'; dateText += ' (期限切れ)'; }
+                else if (diffDays <= 2) { dateClass = 'status-soon'; dateText += (diffDays===0?' (今日)':` (あと${diffDays}日)`); }
 
                 let badgeHtml = '';
                 if (item.recipe_count > 0) {
                     badgeHtml = `<button class="recipe-badge-btn" onclick="goToFilteredRecipes(${item.catalog_id}, '${item.name}')">🍳 ${item.recipe_count}</button>`;
                 }
-
                 let thumbHtml = item.image_path ? `<img src="/images/${item.image_path}" class="list-thumbnail">` : '';
                 let amountDisplay = item.amount === -1 ? '<span class="stock-status-ok">在庫あり</span>' : `${item.amount} ${item.unit}`;
 
@@ -1508,10 +1440,7 @@ function renderInventory(items) {
 document.addEventListener('input', (e) => {
     if (e.target.id === 'inventory-search') {
         const term = e.target.value.toLowerCase().trim();
-        if (!term) {
-            renderInventory(inventoryData);
-            return;
-        }
+        if (!term) { renderInventory(inventoryData); return; }
         const filtered = inventoryData.filter(item => {
             const nameMatch = item.name.toLowerCase().includes(term);
             const kanaMatch = item.kana && item.kana.toLowerCase().includes(term);
@@ -1878,37 +1807,46 @@ function setupImageUpload(inputId, previewId, pathInputId) {
 }
 
 ----- C:\Users\wasab\OneDrive\デスクトップ\kimichan2\static\js\recipe_edit.js -----
-// --- 編集画面 ---
-
 function openRecipeEditModal() {
-    // 詳細画面を閉じる
-    document.getElementById('modal-recipe-detail').classList.remove('active');
+    const detailModal = document.getElementById('modal-recipe-detail');
+    if(detailModal) detailModal.classList.remove('active');
     
-    // タイトル変更
     document.getElementById('modal-recipe-title').textContent = 'レシピ編集';
     
-    // 既存データをフォームにセット
+    if (typeof currentRecipeDetail === 'undefined' || !currentRecipeDetail) return;
+
     document.getElementById('rec-id').value = currentRecipeDetail.id;
     document.getElementById('rec-name').value = currentRecipeDetail.name;
     document.getElementById('rec-yield').value = currentRecipeDetail.yield || '';
     document.getElementById('rec-url').value = currentRecipeDetail.url;
+    
     document.getElementById('rec-process').value = currentRecipeDetail.process;
+    document.getElementById('rec-original-process').value = currentRecipeDetail.original_process || '';
 
-    // 材料リストをCSVテキストに変換してセット
-    let csvText = "";
-    if (currentIngredients && currentIngredients.length > 0) {
-        csvText = currentIngredients.map(ing => {
-            // 形式: 名前,分量,単位
-            return `${ing.name},${ing.amount},${ing.unit}`;
-        }).join('\n');
+    let csvLines = [];
+    let lastGroup = null;
+
+    if (typeof currentIngredients !== 'undefined' && currentIngredients && currentIngredients.length > 0) {
+        currentIngredients.forEach(ing => {
+            if (ing.group_name && ing.group_name !== lastGroup) {
+                csvLines.push(`=${ing.group_name}=`);
+                lastGroup = ing.group_name;
+            } else if (!ing.group_name && lastGroup !== null) {
+                lastGroup = null;
+            }
+            
+            const details = ing.details || '';
+            const combinedAmount = ing.unit ? `${ing.amount}${ing.unit}` : ing.amount;
+            
+            csvLines.push(`${ing.name},${combinedAmount},${details}`);
+        });
     }
-    document.getElementById('rec-csv').value = csvText;
+    document.getElementById('rec-csv').value = csvLines.join('\n');
+    
+    document.getElementById('rec-original-ingredients').value = currentRecipeDetail.original_ingredients || '';
 
-    // 登録モーダルを開く
     document.getElementById('modal-recipe').classList.add('active');
 }
-
-// --- UIイベント設定 ---
 
 function setupRecipeUI() {
     const fab = document.getElementById('fab-add-recipe');
@@ -1926,42 +1864,42 @@ function setupRecipeUI() {
 
     if (!fab) return;
 
-    // 新規登録ボタン
     fab.addEventListener('click', () => {
         document.getElementById('modal-recipe-title').textContent = 'レシピ登録';
         document.getElementById('rec-id').value = ''; 
         document.getElementById('rec-name').value = '';
         document.getElementById('rec-yield').value = '';
         document.getElementById('rec-url').value = '';
+        
         document.getElementById('rec-process').value = '';
+        document.getElementById('rec-original-process').value = '';
+        
         document.getElementById('rec-csv').value = '';
+        document.getElementById('rec-original-ingredients').value = '';
+        
         overlay.classList.add('active');
     });
-    
-    // キャンセル・閉じる
-    btnCancel.addEventListener('click', () => overlay.classList.remove('active'));
-    btnDetailClose.addEventListener('click', () => detailOverlay.classList.remove('active'));
-    
-    // 編集ボタン
-    btnDetailEdit.addEventListener('click', () => openRecipeEditModal());
 
-    // 保存実行
-    btnSave.addEventListener('click', () => saveRecipe());
+    if(btnCancel) btnCancel.addEventListener('click', () => overlay.classList.remove('active'));
+    if(btnDetailClose) btnDetailClose.addEventListener('click', () => detailOverlay.classList.remove('active'));
+    if(btnDetailEdit) btnDetailEdit.addEventListener('click', () => openRecipeEditModal());
 
-    // 不足食材モーダル
-    btnMissingCancel.addEventListener('click', () => missingOverlay.classList.remove('active'));
-    btnMissingRegister.addEventListener('click', () => registerMissingItemsAndRetry());
+    if(btnSave) btnSave.addEventListener('click', () => saveRecipe());
+    if(btnMissingCancel) btnMissingCancel.addEventListener('click', () => missingOverlay.classList.remove('active'));
+    if(btnMissingRegister) btnMissingRegister.addEventListener('click', () => registerMissingItemsAndRetry());
 }
-
-// --- 保存処理 ---
 
 function saveRecipe() {
     const id = document.getElementById('rec-id').value;
     const name = document.getElementById('rec-name').value;
     const yieldVal = document.getElementById('rec-yield').value;
     const url = document.getElementById('rec-url').value;
+    
     const process = document.getElementById('rec-process').value;
+    const origProcess = document.getElementById('rec-original-process').value;
+    
     const csvData = document.getElementById('rec-csv').value;
+    const origIng = document.getElementById('rec-original-ingredients').value;
 
     if (!name) return alert('レシピ名は必須です');
     if (!csvData) return alert('材料CSVを入力してください');
@@ -1971,7 +1909,9 @@ function saveRecipe() {
         yield: yieldVal,
         url: url,
         process: process,
-        csv_data: csvData
+        original_process: origProcess,
+        csv_data: csvData,
+        original_ingredients: origIng
     };
 
     let method = 'POST';
@@ -1989,7 +1929,6 @@ function saveRecipe() {
     .then(async res => {
         const data = await res.json();
         
-        // エラーハンドリング: 不足食材がある場合
         if (!res.ok && data.error_code === 'missing_ingredients') {
             showMissingIngredientsModal(data.items);
             throw new Error('missing_ingredients');
@@ -2001,7 +1940,7 @@ function saveRecipe() {
     .then(() => {
         alert(id ? 'レシピを更新しました！' : 'レシピを登録しました！');
         document.getElementById('modal-recipe').classList.remove('active');
-        fetchRecipes();
+        if (typeof fetchRecipes === 'function') fetchRecipes();
     })
     .catch(err => {
         if (err.message !== 'missing_ingredients') {
@@ -2010,20 +1949,16 @@ function saveRecipe() {
     });
 }
 
-// --- 不足食材のクイック登録 ---
-
 function showMissingIngredientsModal(items) {
     const overlay = document.getElementById('modal-missing-ing');
     const listArea = document.getElementById('missing-list-area');
     listArea.innerHTML = '';
-
     items.forEach((name, index) => {
         const div = document.createElement('div');
         div.className = 'form-group';
         div.style.background = '#f9f9f9';
         div.style.padding = '10px';
         div.style.borderRadius = '8px';
-        
         div.innerHTML = `
             <div style="font-weight:bold; margin-bottom:5px;">${name}</div>
             <div style="display:flex; gap:10px;">
@@ -2036,19 +1971,16 @@ function showMissingIngredientsModal(items) {
         `;
         listArea.appendChild(div);
     });
-
     overlay.classList.add('active');
 }
 
 function registerMissingItemsAndRetry() {
     const listArea = document.getElementById('missing-list-area');
     const itemsToRegister = [];
-    
     const divs = listArea.querySelectorAll('.form-group');
     divs.forEach((div, index) => {
         const name = document.getElementById(`missing-name-${index}`).value;
         const cls = document.getElementById(`missing-class-${index}`).value;
-        
         itemsToRegister.push({
             name: name,
             classification: cls,
@@ -2057,7 +1989,6 @@ function registerMissingItemsAndRetry() {
         });
     });
 
-    // カタログへの一括登録
     fetch('/api/catalog', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
@@ -2068,7 +1999,6 @@ function registerMissingItemsAndRetry() {
         return res.json();
     })
     .then(() => {
-        // 成功したらモーダルを閉じて、レシピ保存を再試行
         document.getElementById('modal-missing-ing').classList.remove('active');
         saveRecipe(); 
     })
@@ -2076,19 +2006,15 @@ function registerMissingItemsAndRetry() {
 }
 
 ----- C:\Users\wasab\OneDrive\デスクトップ\kimichan2\static\js\recipe_list.js -----
-// グローバル変数（edit.jsでも使用）
-let recipeData = [];
-let currentRecipeDetail = null;
-let currentIngredients = [];
-
-// --- 初期化とデータ取得 ---
+var recipeData = [];
+var currentRecipeDetail = null;
+var currentIngredients = [];
+var currentMissingItems = []; // ★追加: 一括追加用に不足リストを保持
 
 function initRecipes() {
-    // フィルタ情報（冷蔵庫からの遷移など）があるか確認
     const filterId = sessionStorage.getItem('recipe_filter_id');
     const filterName = sessionStorage.getItem('recipe_filter_name');
     
-    // ★追加: レシピ検索イベントの設定
     const searchInput = document.getElementById('recipe-search');
     if (searchInput) {
         searchInput.addEventListener('input', (e) => {
@@ -2110,15 +2036,14 @@ function initRecipes() {
         fetchRecipes();
     }
     
-    // 編集機能のセットアップ（recipe_edit.jsの関数）
     if (typeof setupRecipeUI === 'function') {
         setupRecipeUI();
     }
 }
 
 function fetchRecipes() {
-    showFilterHeader(null); // フィルタ表示をクリア
-    fetch('/api/recipes')
+    showFilterHeader(null);
+    fetch('/api/recipes?all=true')
         .then(res => res.json())
         .then(data => {
             recipeData = data;
@@ -2128,7 +2053,7 @@ function fetchRecipes() {
 }
 
 function fetchFilteredRecipes(catalogId, itemName) {
-    showFilterHeader(itemName); // 「〇〇のレシピ」ヘッダー表示
+    showFilterHeader(itemName);
     fetch(`/api/recipes?ingredient_id=${catalogId}`)
         .then(res => res.json())
         .then(data => {
@@ -2138,39 +2063,38 @@ function fetchFilteredRecipes(catalogId, itemName) {
         .catch(err => console.error(err));
 }
 
-// フィルタ解除バーの表示
 function showFilterHeader(itemName) {
     const listEl = document.getElementById('recipe-list');
     const existing = document.getElementById('filter-status-bar');
     if (existing) existing.remove();
-
     if (!itemName) return;
 
     const bar = document.createElement('div');
     bar.id = 'filter-status-bar';
-    bar.style.cssText = 'background:#fff3e0; padding:10px 15px; margin-bottom:15px; border-radius:8px; display:flex; justify-content:space-between; align-items:center; color:#e67e22; font-weight:bold; font-size:14px;';
+    bar.className = 'recipe-group-header';
+    bar.style.display = 'flex';
+    bar.style.justifyContent = 'space-between';
+    bar.style.alignItems = 'center';
+    
     bar.innerHTML = `
         <span>🔍 ${itemName} のレシピ</span>
-        <button id="btn-clear-filter" style="background:#ddd; border:none; padding:5px 10px; border-radius:15px; font-size:12px; cursor:pointer;">解除</button>
+        <button id="btn-clear-filter" style="background:#ddd; border:none; padding:4px 10px; border-radius:15px; font-size:11px; cursor:pointer;">解除</button>
     `;
     listEl.parentNode.insertBefore(bar, listEl);
 
     document.getElementById('btn-clear-filter').addEventListener('click', () => {
         sessionStorage.removeItem('recipe_filter_id');
         sessionStorage.removeItem('recipe_filter_name');
-        fetchRecipes(); // 全件再取得
+        fetchRecipes();
     });
 }
-
-// --- リスト描画 ---
 
 function renderRecipes(items) {
     const listEl = document.getElementById('recipe-list');
     if (!listEl) return;
     listEl.innerHTML = '';
-
-    if (items.length === 0) {
-        listEl.innerHTML = '<p style="text-align:center; color:#999; margin-top:20px;">レシピが見つかりません</p>';
+    if (!items || items.length === 0) {
+        listEl.innerHTML = '<p class="inventory-empty-msg">レシピが見つかりません</p>';
         return;
     }
 
@@ -2179,7 +2103,6 @@ function renderRecipes(items) {
         div.className = 'card';
         div.onclick = () => openRecipeDetail(item);
         
-        // 在庫状況アイコン (クラスを使って視認性を制御)
         const ingIcon = item.has_ingredients ? '<span class="icon-strong">🥦</span>' : '<span class="icon-faint">🥦</span>';
         const seasIcon = item.has_seasonings ? '<span class="icon-strong">🧂</span>' : '<span class="icon-faint">🧂</span>';
 
@@ -2197,9 +2120,6 @@ function renderRecipes(items) {
     });
 }
 
-// --- 詳細画面表示 ---
-
-// --- 詳細画面表示 ---
 function openRecipeDetail(recipe) {
     currentRecipeDetail = recipe;
     
@@ -2229,6 +2149,7 @@ function openRecipeDetail(recipe) {
         .then(res => res.json())
         .then(ingredients => {
             currentIngredients = ingredients || [];
+            currentMissingItems = []; // ★リセット
 
             if (!ingredients || ingredients.length === 0) {
                 ingArea.innerHTML = '<div style="color:#999;">材料登録なし</div>';
@@ -2236,18 +2157,20 @@ function openRecipeDetail(recipe) {
             }
 
             let html = '<ul style="list-style:none; padding:0;">';
-            let missingItems = [];
+            let missingItemsNames = [];
             let currentGroup = "";
 
             ingredients.forEach(ing => {
                 const statusIcon = ing.in_stock ? '✅' : '❌';
                 const statusClass = ing.in_stock ? 'ing-status-ok' : 'ing-status-missing';
                 
-                // ★追加: 在庫がない場合に「＋」ボタンを表示
                 let addBtnHtml = '';
                 if (!ing.in_stock) {
-                    missingItems.push(ing.name);
-                    // catalog_id と 名前 を渡す
+                    missingItemsNames.push(ing.name);
+                    // ★一括追加用に保持
+                    currentMissingItems.push({ id: ing.catalog_id, name: ing.name });
+
+                    // 個別追加ボタンも残す
                     addBtnHtml = `<button class="btn-quick-add" onclick="quickAddToInventory(${ing.catalog_id}, '${ing.name}')">＋在庫へ</button>`;
                 }
 
@@ -2258,24 +2181,32 @@ function openRecipeDetail(recipe) {
                     currentGroup = "";
                 }
 
+                const detailsHtml = ing.details ? `<span style="font-size:11px; color:#666; margin-left:4px;">(${ing.details})</span>` : '';
+                const combinedAmount = ing.unit ? `${ing.amount}${ing.unit}` : ing.amount;
+
                 html += `
                 <li style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px dashed #eee; padding:8px 0;">
                     <div style="display:flex; align-items:center;">
                         <span class="${statusClass}">
-                            ${statusIcon} ${ing.name}
+                             ${statusIcon} ${ing.name}${detailsHtml}
                         </span>
-                        ${addBtnHtml} </div>
-                    <span style="font-weight:bold; font-size:13px;">${ing.amount}${ing.unit}</span>
+                        ${addBtnHtml}
+                    </div>
+                    <span style="font-weight:bold; font-size:13px;">${combinedAmount}</span>
                 </li>`;
             });
             html += '</ul>';
             ingArea.innerHTML = html;
 
-            if (missingItems.length > 0 && missingAlert) {
+            if (missingItemsNames.length > 0 && missingAlert) {
                 missingAlert.style.display = 'block';
+                // ★一括追加ボタンを含めたHTMLに変更
                 missingAlert.innerHTML = `
-                    <strong>⚠️ 足りないもの (${missingItems.length})</strong><br>
-                    ${missingItems.join('、')}
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                        <strong>⚠️ 足りないもの (${missingItemsNames.length})</strong>
+                        <button class="btn-save" style="padding:4px 12px; font-size:11px; background:#27ae60;" onclick="bulkAddMissingToInventory()">まとめて在庫へ</button>
+                    </div>
+                    <div style="font-size:12px;">${missingItemsNames.join('、')}</div>
                 `;
             }
         })
@@ -2283,55 +2214,61 @@ function openRecipeDetail(recipe) {
             console.error(err);
             ingArea.innerHTML = '<div style="color:red;">読み込みエラー</div>';
         });
-        
+
     modal.classList.add('active');
 }
 
-// ★修正: クイック追加機能 (400エラー対策)
+// 個別追加
 window.quickAddToInventory = function(catalogId, name) {
     if (!confirm(`「${name}」を在庫(その他)に追加しますか？`)) return;
+    postIngredientToInventory(catalogId, name).then(() => {
+        alert(`「${name}」に追加しました！`);
+        document.getElementById('modal-recipe-detail').classList.remove('active');
+        if (typeof fetchInventory === 'function') fetchInventory();
+    });
+};
 
-    // 数値型に変換（これが重要）
+// ★一括追加
+window.bulkAddMissingToInventory = function() {
+    if (currentMissingItems.length === 0) return;
+    if (!confirm(`不足している食材 ${currentMissingItems.length} 点を全て在庫に追加しますか？`)) return;
+
+    // Promise.allで並列実行
+    const promises = currentMissingItems.map(item => postIngredientToInventory(item.id, item.name));
+
+    Promise.all(promises)
+        .then(() => {
+            alert('全ての不足食材を追加しました！');
+            document.getElementById('modal-recipe-detail').classList.remove('active');
+            if (typeof fetchInventory === 'function') fetchInventory();
+        })
+        .catch(err => alert('エラーが発生しました: ' + err));
+};
+
+// 共通の追加API呼び出し
+function postIngredientToInventory(catalogId, name) {
     const catId = parseInt(catalogId, 10);
-
     if (isNaN(catId) || catId <= 0) {
-        alert("エラー: 食材IDが不正です");
-        return;
+        return Promise.reject("ID不正");
     }
 
     const data = {
         catalog_id: catId,
-        amount: -1, // 在庫ありマーク
+        amount: -1, 
         unit: "",
-        expiration_date: "", // 空文字でOK
+        expiration_date: "",
         location: "その他"
     };
 
-    fetch('/api/ingredients', {
+    return fetch('/api/ingredients', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify(data)
-    })
-    .then(async res => {
-        if (!res.ok) {
-            // エラー内容をテキストで取得して表示
-            const errorText = await res.text();
-            throw new Error(errorText || res.statusText);
-        }
-        alert(`「${name}」を追加しました！`);
-        
-        // 詳細モーダルを閉じる
-        const modal = document.getElementById('modal-recipe-detail');
-        if(modal) modal.classList.remove('active');
-        
-        // 在庫リスト画面なら更新
-        if (typeof fetchInventory === 'function') fetchInventory();
-    })
-    .catch(err => {
-        console.error("Quick Add Error:", err);
-        alert('追加できませんでした: ' + err.message);
+    }).then(async res => {
+        if (!res.ok) throw new Error(await res.text());
+        return res.json();
     });
-};
+}
 
 ----- C:\Users\wasab\OneDrive\デスクトップ\kimichan2\static\js\seasoning_fetch.js -----
 // グローバル変数として window に公開

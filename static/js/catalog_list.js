@@ -1,14 +1,14 @@
 // グローバル変数
 let catalogData = [];
-// ★変更: 固定カテゴリリストを定義 (マスタCSVと同じもの)
+
+// ★修正: 固定カテゴリリストから「調味料」を削除
 const FIXED_CATEGORIES = [
     "野菜", "肉", "肉加工品", "魚介", "缶詰", "卵・乳製品", 
-    "大豆製品", "調味料", "乾物・粉類", "麺類", "パン", "穀物", "その他"
+    "大豆製品", "乾物・粉類", "麺類", "パン", "穀物", "その他"
 ];
 
 function initCatalog() {
     fetchCatalog();
-    // catalog_edit.js にあるセットアップ関数を呼ぶ
     if (typeof setupCatalogUI === 'function') {
         setupCatalogUI();
     }
@@ -20,21 +20,20 @@ function fetchCatalog() {
         .then(res => res.json())
         .then(data => {
             catalogData = data;
-            setupCategoryFilter(); // フィルタ準備
-            filterAndRender();     // 初期表示
+            setupCategoryFilter(); 
+            filterAndRender();     
         })
         .catch(err => console.error('Fetch error:', err));
 }
 
-// ★修正: プルダウンの選択肢を作る
 function setupCategoryFilter() {
     const select = document.getElementById('catalog-category-filter');
+    const classSelect = document.getElementById('catalog-classification-filter'); // ★追加
+
     if (!select) return;
 
-    // 一旦クリア
     select.innerHTML = '<option value="すべて">すべてのカテゴリ</option>';
 
-    // 固定リストから選択肢を作成
     FIXED_CATEGORIES.forEach(cat => {
         const opt = document.createElement('option');
         opt.value = cat;
@@ -42,13 +41,19 @@ function setupCategoryFilter() {
         select.appendChild(opt);
     });
     
-    // 未分類のものがある場合のために、データ内の独自カテゴリも追加するか？
-    // 今回は「固定リスト」で運用するため、あえて追加しない（"その他"に含める）方針とします
-    
     // イベントリスナー
     select.addEventListener('change', () => {
         filterAndRender();
     });
+
+    // ★追加: 分類フィルタのイベント
+    if (classSelect) {
+        classSelect.addEventListener('change', () => {
+            // 分類で「調味料」を選んだら、カテゴリは意味をなさないのでリセットする等の挙動も可能だが
+            // ここではシンプルにフィルタ実行のみ行う
+            filterAndRender();
+        });
+    }
 }
 
 // フィルタリングとソートの実行
@@ -56,11 +61,13 @@ function filterAndRender() {
     const term = document.getElementById('catalog-search').value.toLowerCase();
     const sortOrder = document.getElementById('sort-order').value;
     const filterNoKana = document.getElementById('filter-no-kana').checked;
-    // ★プルダウンの値を取得
+    
+    // プルダウンの値を取得
     const selectedCategory = document.getElementById('catalog-category-filter').value;
+    const selectedClassification = document.getElementById('catalog-classification-filter').value; // ★追加
     
     let displayData = [...catalogData];
-    
+
     // ソート処理
     if (sortOrder === 'id_desc') {
         displayData.sort((a, b) => b.id - a.id);
@@ -74,13 +81,17 @@ function filterAndRender() {
 
     // フィルタ処理
     const filtered = displayData.filter(item => {
-        // ★カテゴリフィルタ
+        // ★追加: 分類フィルタ
+        let classMatch = true;
+        if (selectedClassification !== 'すべて') {
+            classMatch = (item.classification === selectedClassification);
+        }
+
+        // カテゴリフィルタ
         let catMatch = true;
         if (selectedCategory !== 'すべて') {
-            // アイテムのカテゴリが空なら「その他」、それ以外はそのまま比較
-            const itemCat = item.category || (item.classification === '調味料' ? '調味料' : 'その他');
-            // 固定リストに含まれないカテゴリは「その他」として扱うか、部分一致にするか
-            // ここではシンプルに完全一致で判定
+            // アイテムのカテゴリが空なら「その他」
+            const itemCat = item.category || 'その他';
             catMatch = (itemCat === selectedCategory);
         }
 
@@ -98,7 +109,7 @@ function filterAndRender() {
             noKanaMatch = !item.kana || item.kana.trim() === '';
         }
 
-        return catMatch && termMatch && noKanaMatch;
+        return classMatch && catMatch && termMatch && noKanaMatch;
     });
 
     renderCatalog(filtered);
@@ -110,7 +121,6 @@ function renderCatalog(items) {
     if (!listEl) return;
     
     listEl.innerHTML = '';
-    
     if (items.length === 0) {
         listEl.innerHTML = '<div style="text-align:center; padding:20px; color:#999;">該当なし</div>';
         return;
@@ -125,7 +135,13 @@ function renderCatalog(items) {
             }
         };
         
-        const tagText = `${item.classification} / ${item.category || '未分類'}`;
+        // 表示用タグ: 分類が調味料なら「調味料」のみ表示、食材なら「食材 / カテゴリ」
+        let tagText = "";
+        if (item.classification === '調味料') {
+            tagText = "調味料";
+        } else {
+            tagText = `${item.classification} / ${item.category || '未分類'}`;
+        }
         
         const kanaHtml = item.kana 
             ? `<span style="font-size:11px; color:#999; font-weight:normal; margin-left:5px;">(${item.kana})</span>` 

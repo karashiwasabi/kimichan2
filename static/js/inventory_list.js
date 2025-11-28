@@ -1,5 +1,5 @@
 var inventoryData = [];
-// ★ドアポケットを追加
+// ★ドアポケット追加
 var FIXED_LOCATIONS = ["冷蔵室", "チルド", "冷凍室", "野菜室", "ドアポケット", "その他"];
 
 function initInventory() {

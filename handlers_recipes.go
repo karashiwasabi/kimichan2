@@ -84,7 +84,6 @@ func getRecipes(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var r RecipeResponse
 		var yield, origProc, origIng sql.NullString
-
 		if err := rows.Scan(&r.ID, &r.Name, &yield, &r.Process, &origProc, &r.URL, &r.CreatedAt, &origIng); err != nil {
 			continue
 		}
@@ -135,10 +134,6 @@ func getRecipes(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// --- ★修正: 在庫チェックのロジックを変更 ---
-
-	// 1. 冷蔵庫(refrigerator_ingredients)にある全てのcatalog_idを取得
-	//    (調味料もここに保存されるようになったため、ここだけ見ればOK)
 	invMap := make(map[int]bool)
 	rowsInv, _ := db.Query("SELECT catalog_id FROM refrigerator_ingredients")
 	if rowsInv != nil {
@@ -150,25 +145,18 @@ func getRecipes(w http.ResponseWriter, r *http.Request) {
 		rowsInv.Close()
 	}
 
-	// ※旧調味料テーブル(refrigerator_seasonings)への参照は削除しました
-
-	// 2. 判定ロジック
 	for i := range recipes {
 		hasIng := true
 		hasSeas := true
 		ingredients := recipeIngMap[recipes[i].ID]
 
 		for _, ing := range ingredients {
-			// 在庫があるかチェック (invMapだけを見る)
 			inStock := invMap[ing.CatalogID]
-
 			if ing.Classification == "調味料" {
-				// 分類が調味料の場合、在庫がなければ hasSeas を false に
 				if !inStock {
 					hasSeas = false
 				}
 			} else {
-				// それ以外(食材)の場合、在庫がなければ hasIng を false に
 				if !inStock {
 					hasIng = false
 				}
@@ -208,11 +196,13 @@ func saveRecipeCommon(w http.ResponseWriter, r *http.Request, id int) {
 		return
 	}
 
+	// 3列仕様: Amountに単位込み、Detailsを追加
 	type parsedIng struct {
 		CatalogID int
 		Unit      string
 		Amount    string
 		GroupName string
+		Details   string
 	}
 	var ingredients []parsedIng
 	var unknownItems []string
@@ -223,8 +213,9 @@ func saveRecipeCommon(w http.ResponseWriter, r *http.Request, id int) {
 		return
 	}
 
-	csvDataProcessed := strings.ReplaceAll(req.CsvData, "/", "\n")
-	scanner := bufio.NewScanner(strings.NewReader(csvDataProcessed))
+	// ★修正: 「/」を改行に変換する処理を削除しました
+	// そのまま req.CsvData を読み込みます
+	scanner := bufio.NewScanner(strings.NewReader(req.CsvData))
 	var currentGroup string
 
 	for scanner.Scan() {
@@ -238,9 +229,20 @@ func saveRecipeCommon(w http.ResponseWriter, r *http.Request, id int) {
 			continue
 		}
 
-		var name, amount, unit string
+		var name, amount, details string
 
-		if strings.Contains(line, "…") {
+		if strings.Contains(line, ",") {
+			parts := strings.Split(line, ",")
+			name = strings.TrimSpace(parts[0])
+			// 2列目: 分量(単位込み)
+			if len(parts) > 1 {
+				amount = strings.TrimSpace(parts[1])
+			}
+			// 3列目: 詳細
+			if len(parts) > 2 {
+				details = strings.TrimSpace(parts[2])
+			}
+		} else if strings.Contains(line, "…") {
 			parts := strings.SplitN(line, "…", 2)
 			name = strings.TrimSpace(parts[0])
 			if len(parts) > 1 {
@@ -251,15 +253,6 @@ func saveRecipeCommon(w http.ResponseWriter, r *http.Request, id int) {
 			name = strings.TrimSpace(parts[0])
 			if len(parts) > 1 {
 				amount = strings.TrimSpace(parts[1])
-			}
-		} else if strings.Contains(line, ",") {
-			parts := strings.Split(line, ",")
-			name = strings.TrimSpace(parts[0])
-			if len(parts) > 1 {
-				amount = strings.TrimSpace(parts[1])
-			}
-			if len(parts) > 2 {
-				unit = strings.TrimSpace(parts[2])
 			}
 		} else {
 			name = line
@@ -278,9 +271,10 @@ func saveRecipeCommon(w http.ResponseWriter, r *http.Request, id int) {
 
 		ingredients = append(ingredients, parsedIng{
 			CatalogID: catalogID,
-			Unit:      unit,
+			Unit:      "", // 単位カラムは空にする
 			Amount:    amount,
 			GroupName: currentGroup,
+			Details:   details,
 		})
 	}
 
@@ -316,7 +310,7 @@ func saveRecipeCommon(w http.ResponseWriter, r *http.Request, id int) {
 		}
 	}
 
-	ingStmt, err := tx.Prepare("INSERT INTO recipe_ingredients(recipe_id, catalog_id, unit, amount, group_name) VALUES(?, ?, ?, ?, ?)")
+	ingStmt, err := tx.Prepare("INSERT INTO recipe_ingredients(recipe_id, catalog_id, unit, amount, group_name, details) VALUES(?, ?, ?, ?, ?, ?)")
 	if err != nil {
 		tx.Rollback()
 		sendJSONError(w, err.Error(), http.StatusInternalServerError)
@@ -325,7 +319,7 @@ func saveRecipeCommon(w http.ResponseWriter, r *http.Request, id int) {
 	defer ingStmt.Close()
 
 	for _, ing := range ingredients {
-		if _, err := ingStmt.Exec(id, ing.CatalogID, ing.Unit, ing.Amount, ing.GroupName); err != nil {
+		if _, err := ingStmt.Exec(id, ing.CatalogID, ing.Unit, ing.Amount, ing.GroupName, ing.Details); err != nil {
 			tx.Rollback()
 			sendJSONError(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -354,14 +348,13 @@ func handleRecipeIngredients(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// ★修正: 在庫数カウントも refrigerator_ingredients だけを見るように統一
-	// (ORDER BY ri.id ASC で登録順を維持)
 	query := `
 		SELECT 
 			c.name, 
 			ri.amount, 
 			ri.unit,
 			ri.group_name,
+			ri.details,
 			ri.catalog_id, 
 			(SELECT COUNT(*) FROM refrigerator_ingredients WHERE catalog_id = c.id) as stock_count
 		FROM recipe_ingredients ri
@@ -382,6 +375,7 @@ func handleRecipeIngredients(w http.ResponseWriter, r *http.Request) {
 		Amount    string `json:"amount"`
 		Unit      string `json:"unit"`
 		GroupName string `json:"group_name"`
+		Details   string `json:"details"`
 		CatalogID int    `json:"catalog_id"`
 		InStock   bool   `json:"in_stock"`
 	}
@@ -390,12 +384,13 @@ func handleRecipeIngredients(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var i ResIngredient
 		var stockCount int
-		var gn sql.NullString
-		if err := rows.Scan(&i.Name, &i.Amount, &i.Unit, &gn, &i.CatalogID, &stockCount); err != nil {
+		var gn, dt sql.NullString
+		if err := rows.Scan(&i.Name, &i.Amount, &i.Unit, &gn, &dt, &i.CatalogID, &stockCount); err != nil {
 			sendJSONError(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 		i.GroupName = gn.String
+		i.Details = dt.String
 		i.InStock = (stockCount > 0)
 		ingredients = append(ingredients, i)
 	}

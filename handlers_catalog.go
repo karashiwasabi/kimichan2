@@ -15,7 +15,7 @@ func handleCatalog(w http.ResponseWriter, r *http.Request) {
 		addCatalogItems(w, r)
 	case "PUT":
 		updateCatalogItem(w, r)
-	case "DELETE": // ★追加
+	case "DELETE":
 		deleteCatalogItem(w, r)
 	default:
 		sendJSONError(w, "Method Not Allowed", http.StatusMethodNotAllowed)
@@ -171,11 +171,13 @@ func updateCatalogItem(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
+
 		// 統合処理
 		tx.Exec("UPDATE refrigerator_ingredients SET catalog_id = ? WHERE catalog_id = ?", targetID, req.ID)
-		tx.Exec("UPDATE refrigerator_seasonings SET catalog_id = ? WHERE catalog_id = ?", targetID, req.ID)
 		tx.Exec("UPDATE recipe_ingredients SET catalog_id = ? WHERE catalog_id = ?", targetID, req.ID)
+		// 調味料テーブルは無視
 		tx.Exec("DELETE FROM item_catalog WHERE id = ?", req.ID)
+
 	} else {
 		query := `UPDATE item_catalog SET name=?, kana=?, classification=?, category=?, default_unit=? WHERE id=?`
 		if _, err := tx.Exec(query, req.Name, req.Kana, req.Classification, req.Category, req.DefaultUnit, req.ID); err != nil {
@@ -193,7 +195,6 @@ func updateCatalogItem(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{"status": "success"})
 }
 
-// ★追加: 削除機能
 func deleteCatalogItem(w http.ResponseWriter, r *http.Request) {
 	idStr := r.URL.Query().Get("id")
 	if idStr == "" {
@@ -203,7 +204,7 @@ func deleteCatalogItem(w http.ResponseWriter, r *http.Request) {
 	var id int
 	fmt.Sscanf(idStr, "%d", &id)
 
-	// 使用チェック
+	// 使用チェック (調味料テーブルは見ない)
 	var count int
 	db.QueryRow("SELECT count(*) FROM recipe_ingredients WHERE catalog_id = ?", id).Scan(&count)
 	if count > 0 {
@@ -213,11 +214,6 @@ func deleteCatalogItem(w http.ResponseWriter, r *http.Request) {
 	db.QueryRow("SELECT count(*) FROM refrigerator_ingredients WHERE catalog_id = ?", id).Scan(&count)
 	if count > 0 {
 		sendJSONError(w, "在庫にあるため削除できません", http.StatusConflict)
-		return
-	}
-	db.QueryRow("SELECT count(*) FROM refrigerator_seasonings WHERE catalog_id = ?", id).Scan(&count)
-	if count > 0 {
-		sendJSONError(w, "調味料リストにあるため削除できません", http.StatusConflict)
 		return
 	}
 

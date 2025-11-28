@@ -1,8 +1,9 @@
 // catalog_list.js で定義した FIXED_CATEGORIES を参照したいが、
 // モジュール分割されていないため再定義して安全策を取ります
+// ★修正: ここから「調味料」を除外しました（食材用のリストとするため）
 const FIXED_CATEGORIES_EDIT = [
     "野菜", "肉", "肉加工品", "魚介", "缶詰", "卵・乳製品", 
-    "大豆製品", "調味料", "乾物・粉類", "麺類", "パン", "穀物", "その他"
+    "大豆製品", "乾物・粉類", "麺類", "パン", "穀物", "その他"
 ];
 
 function setupCatalogUI() {
@@ -21,6 +22,14 @@ function setupCatalogUI() {
     const sortSelect = document.getElementById('sort-order');
     const noKanaCheck = document.getElementById('filter-no-kana');
     const nameInput = document.getElementById('input-name');
+    
+    // ★追加: 分類プルダウンの制御
+    const classSelect = document.getElementById('input-classification');
+    if (classSelect) {
+        classSelect.addEventListener('change', () => {
+            toggleCategorySelect(classSelect.value);
+        });
+    }
 
     if (!fab) return;
 
@@ -31,6 +40,12 @@ function setupCatalogUI() {
         document.getElementById('original-name').value = '';
         if(btnDelete) btnDelete.style.display = 'none';
         
+        // デフォルトは食材
+        if(classSelect) {
+            classSelect.value = '食材';
+            toggleCategorySelect('食材');
+        }
+
         // カテゴリプルダウンを初期化
         updateCategorySelectEdit('');
         overlay.classList.add('active');
@@ -73,6 +88,18 @@ function setupCatalogUI() {
 
 // --- ヘルパー関数 ---
 
+// ★追加: 分類によってカテゴリ欄の表示/非表示を切り替える
+function toggleCategorySelect(classification) {
+    const group = document.getElementById('form-group-category'); // HTML側でID付与が必要
+    if (!group) return;
+
+    if (classification === '調味料') {
+        group.style.display = 'none';
+    } else {
+        group.style.display = 'block';
+    }
+}
+
 function switchTab(mode) {
     const tabSingle = document.getElementById('tab-single');
     const tabCsv = document.getElementById('tab-csv');
@@ -114,12 +141,17 @@ async function openCatalogEditModal(item) {
     document.getElementById('edit-id').value = item.id;
     document.getElementById('original-unit').value = item.default_unit || '';
     document.getElementById('original-name').value = item.name || ''; 
-    document.getElementById('input-classification').value = item.classification;
+    
+    const classSelect = document.getElementById('input-classification');
+    classSelect.value = item.classification;
+    // ★表示切り替え実行
+    toggleCategorySelect(item.classification);
+
     document.getElementById('input-name').value = item.name;
     document.getElementById('input-kana').value = item.kana || '';
     document.getElementById('input-unit').value = item.default_unit;
 
-    // ★カテゴリプルダウンをセット
+    // カテゴリプルダウンをセット
     updateCategorySelectEdit(item.category);
 
     if (btnDelete) {
@@ -147,15 +179,15 @@ function removeConflictUI() {
     }
 }
 
-// ★修正: 固定リストを使ってプルダウンを作る
+// 固定リストを使ってプルダウンを作る
 function updateCategorySelectEdit(selectedCategory) {
     const select = document.getElementById('select-category');
-    // 手入力欄は廃止（固定リストのみにする）
+    
+    // 手入力欄は廃止（HTMLに残っていても非表示にする）
     const input = document.getElementById('input-category');
     if(input) input.style.display = 'none'; 
 
     select.innerHTML = '';
-    
     // 固定リストを展開
     FIXED_CATEGORIES_EDIT.forEach(c => {
         const opt = document.createElement('option');
@@ -168,28 +200,24 @@ function updateCategorySelectEdit(selectedCategory) {
     if (selectedCategory && FIXED_CATEGORIES_EDIT.includes(selectedCategory)) {
         select.value = selectedCategory;
     } else {
-        select.value = "その他"; // デフォルト
+        select.value = "その他";
     }
 }
 
 function updateReferenceList(name) {
     const refArea = document.getElementById('reference-area');
     const refList = document.getElementById('reference-list');
-    
     if (!name || name.length < 1) {
         refArea.style.display = 'none';
         return;
     }
-    // catalogData (list.js) がある前提
     if (typeof catalogData === 'undefined') return;
-
     const term = name.toLowerCase();
     const hits = catalogData.filter(d => {
         const n = d.name.toLowerCase();
         const k = d.kana ? d.kana.toLowerCase() : '';
         return n.includes(term) || k.includes(term) || term.includes(n);
     }).slice(0, 8);
-
     if (hits.length === 0) {
         refArea.style.display = 'none';
         return;
@@ -198,7 +226,7 @@ function updateReferenceList(name) {
     refList.innerHTML = '';
     hits.forEach(hit => {
         const chip = document.createElement('div');
-        chip.className = 'preset-chip'; // CSS流用
+        chip.className = 'preset-chip'; 
         chip.innerHTML = `<strong>${hit.name}</strong>`;
         chip.onclick = () => applyReferenceItem(hit);
         refList.appendChild(chip);
@@ -211,6 +239,7 @@ function applyReferenceItem(item) {
     document.getElementById('input-name').value = item.name;
     document.getElementById('input-kana').value = item.kana || '';
     document.getElementById('input-classification').value = item.classification;
+    toggleCategorySelect(item.classification); // ★表示切り替え
     document.getElementById('input-unit').value = item.default_unit || '';
     updateCategorySelectEdit(item.category);
 }
@@ -219,10 +248,14 @@ async function saveSingleItem() {
     const id = document.getElementById('edit-id').value;
     const name = document.getElementById('input-name').value;
     const originalName = document.getElementById('original-name').value;
+    const classification = document.getElementById('input-classification').value;
     
-    // カテゴリはプルダウンから取得（手入力廃止）
-    const category = document.getElementById('select-category').value;
-    
+    // ★修正: 調味料ならカテゴリも「調味料」、そうでなければプルダウンから取得
+    let category = '調味料';
+    if (classification !== '調味料') {
+        category = document.getElementById('select-category').value;
+    }
+
     if (!name) return alert('名前を入力してください');
 
     if (id && name !== originalName) {
@@ -237,7 +270,7 @@ async function saveSingleItem() {
 
     const item = {
         id: id ? parseInt(id) : 0,
-        classification: document.getElementById('input-classification').value,
+        classification: classification,
         category: category,
         name: name,
         kana: document.getElementById('input-kana').value,
@@ -295,11 +328,10 @@ function deleteCatalogItem(id, name) {
     .catch(err => alert('削除エラー: ' + err.message));
 }
 
-// CSV一括登録 (省略なし)
+// CSV一括登録
 function saveCsvItem() {
     const text = document.getElementById('input-csv-text').value;
     if (!text) return alert('CSVを入力してください');
-
     fetch('/import/catalog', {
         method: 'POST',
         headers: { 'Content-Type': 'text/plain' },

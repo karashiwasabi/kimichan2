@@ -30,8 +30,9 @@ type GeneratedRecipe struct {
 	Name        string `json:"name"`
 	Yield       string `json:"yield"`
 	Ingredients []struct {
-		Name   string `json:"name"`
-		Amount string `json:"amount"`
+		Name    string `json:"name"`
+		Amount  string `json:"amount"`  // 単位込み
+		Details string `json:"details"` // 追加: 詳細情報
 	} `json:"ingredients"`
 	Process        any    `json:"process"`
 	RawIngredients string `json:"raw_ingredients"`
@@ -53,7 +54,7 @@ func main() {
 	}
 	defer db.Close()
 
-	fmt.Println("🤖 レシピ収集ロボット (警告修正版)、起動...")
+	fmt.Println("🤖 レシピ収集ロボット (3列フォーマット対応版)、起動...")
 
 	currentURL := TARGET_URL
 	totalCollected := 0
@@ -149,7 +150,6 @@ Text: %s`, baseURL, text)
 		return nil, err
 	}
 	var res LinkAnalysisResult
-	// ★修正: "JSON" -> "json"
 	if err := json.Unmarshal([]byte(resStr), &res); err != nil {
 		return nil, fmt.Errorf("json解析失敗: %v", err)
 	}
@@ -160,11 +160,12 @@ func analyzeByGemini(text string) (*GeneratedRecipe, error) {
 	if len(text) > 40000 {
 		text = text[:40000]
 	}
+	// ★修正: amountに単位を含めること、detailsを抽出することを指示
 	prompt := `レシピ情報をJSON抽出。JSONのみ出力。
 keys: 
 - name
 - yield
-- ingredients [{name, amount}]
+- ingredients [{name, amount(単位込みの分量文字列), details(補足情報)}]
 - raw_ingredients (材料リストの原文そのままのテキスト)
 - process (手順の配列)
 - raw_process (手順の原文そのままのテキスト)
@@ -176,7 +177,6 @@ Text: ` + text
 		return nil, err
 	}
 	var r GeneratedRecipe
-	// ★修正: "JSON" -> "json"
 	if err := json.Unmarshal([]byte(resStr), &r); err != nil {
 		return nil, fmt.Errorf("json解析失敗: %v", err)
 	}
@@ -189,7 +189,6 @@ func saveRecipe(db *sql.DB, r *GeneratedRecipe, sourceURL string) error {
 	}
 
 	var exists int
-	// ★修正: "DB" -> "db"
 	err := db.QueryRow("SELECT count(*) FROM recipes WHERE name = ?", r.Name).Scan(&exists)
 	if err != nil {
 		return fmt.Errorf("db検索エラー: %v", err)
@@ -226,7 +225,6 @@ func saveRecipe(db *sql.DB, r *GeneratedRecipe, sourceURL string) error {
 	}
 
 	tx, err := db.Begin()
-	// ★修正: "TX" -> "tx"
 	if err != nil {
 		return fmt.Errorf("tx開始エラー: %v", err)
 	}
@@ -235,7 +233,6 @@ func saveRecipe(db *sql.DB, r *GeneratedRecipe, sourceURL string) error {
 		r.Name, r.Yield, processText, r.RawIngredients, r.RawProcess, sourceURL)
 	if err != nil {
 		tx.Rollback()
-		// ★修正: "レシピ"は日本語なのでOKだが、統一感のため小文字始まりの英語にするか、そのまま
 		return fmt.Errorf("レシピ保存エラー: %v", err)
 	}
 	recipeID, _ := res.LastInsertId()
@@ -261,8 +258,9 @@ func saveRecipe(db *sql.DB, r *GeneratedRecipe, sourceURL string) error {
 			catalogID = int(newID)
 		}
 
-		tx.Exec("INSERT INTO recipe_ingredients(recipe_id, catalog_id, unit, amount, group_name) VALUES(?, ?, ?, ?, ?)",
-			recipeID, catalogID, "", ing.Amount, "")
+		// ★修正: unitは空文字、amountに単位込みの分量、detailsを保存
+		tx.Exec("INSERT INTO recipe_ingredients(recipe_id, catalog_id, unit, amount, group_name, details) VALUES(?, ?, ?, ?, ?, ?)",
+			recipeID, catalogID, "", ing.Amount, "", ing.Details)
 	}
 
 	if err := tx.Commit(); err != nil {

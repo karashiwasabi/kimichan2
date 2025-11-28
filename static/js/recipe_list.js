@@ -1,7 +1,7 @@
-// ★修正: varに変更して再宣言エラーを防止
 var recipeData = [];
 var currentRecipeDetail = null;
 var currentIngredients = [];
+var currentMissingItems = []; // ★追加: 一括追加用に不足リストを保持
 
 function initRecipes() {
     const filterId = sessionStorage.getItem('recipe_filter_id');
@@ -35,7 +35,6 @@ function initRecipes() {
 
 function fetchRecipes() {
     showFilterHeader(null);
-    // PCでは全件取得したい場合は ?all=true をつける（API側の制限回避）
     fetch('/api/recipes?all=true')
         .then(res => res.json())
         .then(data => {
@@ -64,7 +63,7 @@ function showFilterHeader(itemName) {
 
     const bar = document.createElement('div');
     bar.id = 'filter-status-bar';
-    bar.className = 'recipe-group-header'; // CSSクラス利用
+    bar.className = 'recipe-group-header';
     bar.style.display = 'flex';
     bar.style.justifyContent = 'space-between';
     bar.style.alignItems = 'center';
@@ -86,7 +85,6 @@ function renderRecipes(items) {
     const listEl = document.getElementById('recipe-list');
     if (!listEl) return;
     listEl.innerHTML = '';
-
     if (!items || items.length === 0) {
         listEl.innerHTML = '<p class="inventory-empty-msg">レシピが見つかりません</p>';
         return;
@@ -143,6 +141,7 @@ function openRecipeDetail(recipe) {
         .then(res => res.json())
         .then(ingredients => {
             currentIngredients = ingredients || [];
+            currentMissingItems = []; // ★リセット
 
             if (!ingredients || ingredients.length === 0) {
                 ingArea.innerHTML = '<div style="color:#999;">材料登録なし</div>';
@@ -150,7 +149,7 @@ function openRecipeDetail(recipe) {
             }
 
             let html = '<ul style="list-style:none; padding:0;">';
-            let missingItems = [];
+            let missingItemsNames = [];
             let currentGroup = "";
 
             ingredients.forEach(ing => {
@@ -159,8 +158,11 @@ function openRecipeDetail(recipe) {
                 
                 let addBtnHtml = '';
                 if (!ing.in_stock) {
-                    missingItems.push(ing.name);
-                    // ★修正: 確実にIDを渡す
+                    missingItemsNames.push(ing.name);
+                    // ★一括追加用に保持
+                    currentMissingItems.push({ id: ing.catalog_id, name: ing.name });
+
+                    // 個別追加ボタンも残す
                     addBtnHtml = `<button class="btn-quick-add" onclick="quickAddToInventory(${ing.catalog_id}, '${ing.name}')">＋在庫へ</button>`;
                 }
 
@@ -171,25 +173,32 @@ function openRecipeDetail(recipe) {
                     currentGroup = "";
                 }
 
+                const detailsHtml = ing.details ? `<span style="font-size:11px; color:#666; margin-left:4px;">(${ing.details})</span>` : '';
+                const combinedAmount = ing.unit ? `${ing.amount}${ing.unit}` : ing.amount;
+
                 html += `
                 <li style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px dashed #eee; padding:8px 0;">
                     <div style="display:flex; align-items:center;">
                         <span class="${statusClass}">
-                            ${statusIcon} ${ing.name}
+                             ${statusIcon} ${ing.name}${detailsHtml}
                         </span>
                         ${addBtnHtml}
                     </div>
-                    <span style="font-weight:bold; font-size:13px;">${ing.amount}${ing.unit}</span>
+                    <span style="font-weight:bold; font-size:13px;">${combinedAmount}</span>
                 </li>`;
             });
             html += '</ul>';
             ingArea.innerHTML = html;
 
-            if (missingItems.length > 0 && missingAlert) {
+            if (missingItemsNames.length > 0 && missingAlert) {
                 missingAlert.style.display = 'block';
+                // ★一括追加ボタンを含めたHTMLに変更
                 missingAlert.innerHTML = `
-                    <strong>⚠️ 足りないもの (${missingItems.length})</strong><br>
-                    ${missingItems.join('、')}
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                        <strong>⚠️ 足りないもの (${missingItemsNames.length})</strong>
+                        <button class="btn-save" style="padding:4px 12px; font-size:11px; background:#27ae60;" onclick="bulkAddMissingToInventory()">まとめて在庫へ</button>
+                    </div>
+                    <div style="font-size:12px;">${missingItemsNames.join('、')}</div>
                 `;
             }
         })
@@ -197,18 +206,42 @@ function openRecipeDetail(recipe) {
             console.error(err);
             ingArea.innerHTML = '<div style="color:red;">読み込みエラー</div>';
         });
-        
+
     modal.classList.add('active');
 }
 
-// クイック在庫追加
+// 個別追加
 window.quickAddToInventory = function(catalogId, name) {
     if (!confirm(`「${name}」を在庫(その他)に追加しますか？`)) return;
+    postIngredientToInventory(catalogId, name).then(() => {
+        alert(`「${name}」に追加しました！`);
+        document.getElementById('modal-recipe-detail').classList.remove('active');
+        if (typeof fetchInventory === 'function') fetchInventory();
+    });
+};
 
+// ★一括追加
+window.bulkAddMissingToInventory = function() {
+    if (currentMissingItems.length === 0) return;
+    if (!confirm(`不足している食材 ${currentMissingItems.length} 点を全て在庫に追加しますか？`)) return;
+
+    // Promise.allで並列実行
+    const promises = currentMissingItems.map(item => postIngredientToInventory(item.id, item.name));
+
+    Promise.all(promises)
+        .then(() => {
+            alert('全ての不足食材を追加しました！');
+            document.getElementById('modal-recipe-detail').classList.remove('active');
+            if (typeof fetchInventory === 'function') fetchInventory();
+        })
+        .catch(err => alert('エラーが発生しました: ' + err));
+};
+
+// 共通の追加API呼び出し
+function postIngredientToInventory(catalogId, name) {
     const catId = parseInt(catalogId, 10);
     if (isNaN(catId) || catId <= 0) {
-        alert("エラー: 食材IDが不正です(カタログに未登録の可能性があります)");
-        return;
+        return Promise.reject("ID不正");
     }
 
     const data = {
@@ -219,17 +252,12 @@ window.quickAddToInventory = function(catalogId, name) {
         location: "その他"
     };
 
-    fetch('/api/ingredients', {
+    return fetch('/api/ingredients', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify(data)
-    })
-    .then(async res => {
+    }).then(async res => {
         if (!res.ok) throw new Error(await res.text());
-        alert(`「${name}」を追加しました！`);
-        // モーダル閉じて在庫画面なら更新
-        document.getElementById('modal-recipe-detail').classList.remove('active');
-        if (typeof fetchInventory === 'function') fetchInventory();
-    })
-    .catch(err => alert('追加失敗: ' + err));
-};
+        return res.json();
+    });
+}

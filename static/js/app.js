@@ -3,7 +3,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const navItems = document.querySelectorAll('.nav-item');
 
     function loadView(viewName) {
-        // ナビゲーションの見た目を更新
         navItems.forEach(nav => {
             if (nav.dataset.view === viewName) {
                 nav.classList.add('active');
@@ -24,11 +23,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     initCatalog();
                 } else if (viewName === 'inventory' && typeof initInventory === 'function') {
                     initInventory();
-                } else if (viewName === 'seasoning' && typeof initSeasoning === 'function') {
-                    initSeasoning();
                 } else if (viewName === 'recipes' && typeof initRecipes === 'function') {
-                    initRecipes(); // 追加
+                    initRecipes();
                 }
+                // 調味料(seasoning)は削除
             })
             .catch(err => {
                 appContainer.innerHTML = '<p style="text-align:center; margin-top:50px;">読み込みエラー</p>';
@@ -44,6 +42,5 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 
-    // 初期表示
     loadView('inventory');
 });

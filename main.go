@@ -24,10 +24,8 @@ func main() {
 		log.Fatal(err)
 	}
 
-	// ★変更: "data" フォルダの中に保存するように書き換える
+	// データ保存場所
 	DataDir = filepath.Join(currentDir, "data")
-
-	// ★追加: dataフォルダがなければ作る
 	if err := os.MkdirAll(DataDir, 0755); err != nil {
 		log.Fatal(err)
 	}
@@ -50,11 +48,11 @@ func main() {
 
 	mux := http.NewServeMux()
 
+	// ハンドラ登録（調味料は削除済み）
 	mux.HandleFunc("/api/catalog", handleCatalog)
-	mux.HandleFunc("/api/catalog/usage", handleCatalogUsage) // 追加
+	mux.HandleFunc("/api/catalog/usage", handleCatalogUsage)
 	mux.HandleFunc("/api/catalog/export", exportCatalogCSV)
 	mux.HandleFunc("/api/ingredients", handleIngredients)
-	mux.HandleFunc("/api/seasonings", handleSeasonings)
 	mux.HandleFunc("/api/recipes", handleRecipes)
 	mux.HandleFunc("/api/recipes/ingredients", handleRecipeIngredients)
 	mux.HandleFunc("/api/locations", handleLocations)
@@ -62,24 +60,27 @@ func main() {
 	mux.HandleFunc("/api/upload", handleUpload)
 	mux.HandleFunc("/api/fridge_photos", handleFridgePhotos)
 
+	// 静的ファイル（画像とHTML）
 	mux.Handle("/images/", http.StripPrefix("/images/", http.FileServer(http.Dir(imagesPath))))
 
 	staticFS, _ := fs.Sub(staticFiles, "static")
 	mux.Handle("/", http.FileServer(http.FS(staticFS)))
 
 	fmt.Println("Server is running at http://localhost:8080")
+
+	// ★Basic認証を適用して起動
 	if err := http.ListenAndServe(":8080", basicAuth(mux)); err != nil {
 		log.Fatal(err)
 	}
 }
 
-// Basic認証を行うミドルウェア
+// Basic認証ミドルウェア
 func basicAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// ▼▼ ここでIDとパスワードを決めます ▼▼
-		const expectedUser = "wasabi"
-		const expectedPass = "karashi"
-		// ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
+		// ▼▼ ここでIDとパスワードを設定してください ▼▼
+		const expectedUser = "wasabi"  // ← 好きなIDに変更
+		const expectedPass = "karashi" // ← 好きなパスワードに変更
+		// ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
 
 		user, pass, ok := r.BasicAuth()
 		if !ok || user != expectedUser || pass != expectedPass {

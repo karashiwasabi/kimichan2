@@ -1,6 +1,6 @@
-// 変数宣言 (varにして重複エラー回避)
 var catalogListForInv = [];
 var currentSelectorCategory = 'すべて';
+// ★「ドアポケット」を追加
 var FIXED_LOCATIONS_EDIT = ["冷蔵室", "チルド", "冷凍室", "野菜室", "ドアポケット", "その他"];
 
 function initInventoryEdit() {
@@ -13,9 +13,8 @@ function fetchCatalogForInv() {
     fetch('/api/catalog')
         .then(res => res.json())
         .then(data => {
-            // ★全件表示（調味料も含む）
-            let filteredData = data; 
-            
+            // ★修正: フィルタなし（調味料も含む）
+            let filteredData = data;
             filteredData.sort((a, b) => {
                 const ka = a.kana || a.name;
                 const kb = b.kana || b.name;
@@ -58,7 +57,7 @@ function setupEditEventListeners() {
             document.getElementById('inv-detail-toggle').checked = false;
             document.getElementById('inv-detail-area').style.display = 'none';
             document.getElementById('inv-amount').value = 1; 
-            // IDリセット
+            
             const idInput = document.getElementById('inv-select-catalog-id');
             if(idInput) idInput.value = "";
             
@@ -111,6 +110,7 @@ function setupEditEventListeners() {
                 location: location
             };
 
+            // 在庫テーブルへ保存
             fetch('/api/ingredients', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
@@ -167,7 +167,6 @@ function setupEditEventListeners() {
     setupItemSelector();
 }
 
-// 選択モーダル制御
 function setupItemSelector() {
     const btnOpen = document.getElementById('btn-open-selector');
     const modal = document.getElementById('modal-item-selector');
@@ -229,6 +228,7 @@ function renderSelectorList() {
     filtered.forEach(item => {
         const div = document.createElement('div');
         div.className = 'selector-item';
+        // アイコン分け
         const icon = item.classification === '調味料' ? '🧂' : '🥬';
         div.innerHTML = `${icon} ${item.name} <span class="selector-item-kana">${item.kana || ''}</span>`;
         

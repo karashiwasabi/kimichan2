@@ -272,17 +272,17 @@ type LinkAnalysisResult struct {
 	NextPageURL string   `json:"next_page_url"`
 }
 
-// ★修正: 原文フィールドを追加
 type GeneratedRecipe struct {
 	Name        string `json:"name"`
 	Yield       string `json:"yield"`
 	Ingredients []struct {
-		Name   string `json:"name"`
-		Amount string `json:"amount"`
+		Name    string `json:"name"`
+		Amount  string `json:"amount"`  // 単位込み
+		Details string `json:"details"` // 追加: 詳細情報
 	} `json:"ingredients"`
 	Process        any    `json:"process"`
-	RawIngredients string `json:"raw_ingredients"` // ★材料の原文
-	RawProcess     string `json:"raw_process"`     // ★作り方の原文
+	RawIngredients string `json:"raw_ingredients"`
+	RawProcess     string `json:"raw_process"`
 }
 
 var apiKey string
@@ -300,7 +300,7 @@ func main() {
 	}
 	defer db.Close()
 
-	fmt.Println("🤖 レシピ収集ロボット (原文保存版)、起動...")
+	fmt.Println("🤖 レシピ収集ロボット (3列フォーマット対応版)、起動...")
 
 	currentURL := TARGET_URL
 	totalCollected := 0
@@ -339,8 +339,12 @@ func main() {
 			if err == nil {
 				recipe, err := analyzeByGemini(detailHTML)
 				if err == nil {
-					saveRecipe(db, recipe, link)
-					totalCollected++
+					// 保存
+					if err := saveRecipe(db, recipe, link); err != nil {
+						fmt.Printf("    ❌ 保存エラー: %v\n", err)
+					} else {
+						totalCollected++
+					}
 				} else {
 					fmt.Printf("    ❌ AI解析失敗: %v\n", err)
 				}
@@ -363,7 +367,7 @@ func fetchHTML(url string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) ...")
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", err
@@ -392,7 +396,9 @@ Text: %s`, baseURL, text)
 		return nil, err
 	}
 	var res LinkAnalysisResult
-	json.Unmarshal([]byte(resStr), &res)
+	if err := json.Unmarshal([]byte(resStr), &res); err != nil {
+		return nil, fmt.Errorf("json解析失敗: %v", err)
+	}
 	return &res, nil
 }
 
@@ -400,12 +406,12 @@ func analyzeByGemini(text string) (*GeneratedRecipe, error) {
 	if len(text) > 40000 {
 		text = text[:40000]
 	}
-	// ★修正: 原文(raw_*)も出力するように指示
+	// ★修正: amountに単位を含めること、detailsを抽出することを指示
 	prompt := `レシピ情報をJSON抽出。JSONのみ出力。
 keys: 
 - name
 - yield
-- ingredients [{name, amount}]
+- ingredients [{name, amount(単位込みの分量文字列), details(補足情報)}]
 - raw_ingredients (材料リストの原文そのままのテキスト)
 - process (手順の配列)
 - raw_process (手順の原文そのままのテキスト)
@@ -418,21 +424,24 @@ Text: ` + text
 	}
 	var r GeneratedRecipe
 	if err := json.Unmarshal([]byte(resStr), &r); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("json解析失敗: %v", err)
 	}
 	return &r, nil
 }
 
-func saveRecipe(db *sql.DB, r *GeneratedRecipe, sourceURL string) {
+func saveRecipe(db *sql.DB, r *GeneratedRecipe, sourceURL string) error {
 	if r == nil || r.Name == "" {
-		return
+		return fmt.Errorf("レシピデータが空です")
 	}
 
 	var exists int
-	db.QueryRow("SELECT count(*) FROM recipes WHERE name = ?", r.Name).Scan(&exists)
+	err := db.QueryRow("SELECT count(*) FROM recipes WHERE name = ?", r.Name).Scan(&exists)
+	if err != nil {
+		return fmt.Errorf("db検索エラー: %v", err)
+	}
 	if exists > 0 {
 		fmt.Printf("    ⚠️ 登録済み: %s\n", r.Name)
-		return
+		return nil
 	}
 
 	var processText string
@@ -453,11 +462,9 @@ func saveRecipe(db *sql.DB, r *GeneratedRecipe, sourceURL string) {
 		}
 	}
 
-	// もしAIが原文を空で返してきたら、整形済みテキストで代用する
 	if r.RawProcess == "" {
 		r.RawProcess = processText
 	}
-	// 材料原文が空なら、とりあえずJSON文字列表現を入れておく(無いよりマシ)
 	if r.RawIngredients == "" {
 		b, _ := json.Marshal(r.Ingredients)
 		r.RawIngredients = string(b)
@@ -465,11 +472,277 @@ func saveRecipe(db *sql.DB, r *GeneratedRecipe, sourceURL string) {
 
 	tx, err := db.Begin()
 	if err != nil {
-		log.Println(err)
+		return fmt.Errorf("tx開始エラー: %v", err)
+	}
+
+	res, err := tx.Exec("INSERT INTO recipes(name, yield, process, original_ingredients, original_process, url) VALUES(?, ?, ?, ?, ?, ?)",
+		r.Name, r.Yield, processText, r.RawIngredients, r.RawProcess, sourceURL)
+	if err != nil {
+		tx.Rollback()
+		return fmt.Errorf("レシピ保存エラー: %v", err)
+	}
+	recipeID, _ := res.LastInsertId()
+
+	for _, ing := range r.Ingredients {
+		if ing.Name == "" {
+			continue
+		}
+		if utf8.RuneCountInString(ing.Name) > 15 || strings.Contains(ing.Name, "味変") || strings.Contains(ing.Name, "お好み") {
+			continue
+		}
+
+		var catalogID int
+		db.QueryRow("SELECT id FROM item_catalog WHERE name = ?", ing.Name).Scan(&catalogID)
+
+		if catalogID == 0 {
+			res, err := tx.Exec("INSERT INTO item_catalog(name, classification, category, default_unit) VALUES(?, ?, ?, ?)",
+				ing.Name, "食材", "未分類", "")
+			if err != nil {
+				continue
+			}
+			newID, _ := res.LastInsertId()
+			catalogID = int(newID)
+		}
+
+		// ★修正: unitは空文字、amountに単位込みの分量、detailsを保存
+		tx.Exec("INSERT INTO recipe_ingredients(recipe_id, catalog_id, unit, amount, group_name, details) VALUES(?, ?, ?, ?, ?, ?)",
+			recipeID, catalogID, "", ing.Amount, "", ing.Details)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("コミットエラー: %v", err)
+	}
+	fmt.Printf("    ✅ 保存完了: %s\n", r.Name)
+	return nil
+}
+
+
+----- C:\Users\wasab\OneDrive\デスクトップ\kimichan2\tools\manual_importer\main.go -----
+package main
+
+import (
+	"database/sql"
+	"encoding/csv"
+	"encoding/json"
+	"fmt"
+	"log"
+	"os"
+	"path/filepath"
+	"strings"
+	"text/tabwriter"
+
+	"kimichan/tools/common"
+)
+
+const INPUT_FILE = "manual_input.txt"
+const SUBST_FILE = "substitutions.csv"
+
+type GeneratedRecipe struct {
+	Name        string `json:"name"`
+	Yield       string `json:"yield"`
+	Ingredients []struct {
+		Name    string `json:"name"`
+		Amount  string `json:"amount"` // 単位込み
+		Group   string `json:"group"`
+		Details string `json:"details"` // 詳細情報
+	} `json:"ingredients"`
+	Process        any    `json:"process"`
+	RawIngredients string `json:"raw_ingredients"`
+	RawProcess     string `json:"raw_process"`
+}
+
+// AIの名寄せ結果
+type NormalizeResult struct {
+	StandardName string `json:"standard_name"`
+	Kana         string `json:"kana"`
+	Details      string `json:"details"`
+}
+
+// 強制変換ルール
+type Substitution struct {
+	TargetName string
+	Details    string
+}
+
+var apiKey string
+var nameSubstitutions map[string]Substitution
+
+func main() {
+	// 設定読み込み
+	cfg, err := common.LoadConfig()
+	if err != nil {
+		log.Fatal(err)
+	}
+	apiKey = cfg.GeminiApiKey
+
+	// 辞書読み込み
+	loadSubstitutions()
+
+	// DB接続
+	db, err := common.ConnectDB()
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer db.Close()
+
+	fmt.Println("📝 手動レシピ取込ロボット (3列・辞書・ヨミガナ自動付与版)、起動...")
+
+	// テーブルがなければ作成する
+	fixDatabaseSchema(db)
+
+	wd, _ := os.Getwd()
+	inputPath := filepath.Join(wd, INPUT_FILE)
+	if _, err := os.Stat(inputPath); os.IsNotExist(err) {
+		inputPath = filepath.Join(wd, "..", "..", INPUT_FILE)
+	}
+
+	contentBytes, err := os.ReadFile(inputPath)
+	if err != nil {
+		log.Fatalf("❌ 入力ファイル(%s)が見つかりません", INPUT_FILE)
+	}
+	content := string(contentBytes)
+	if strings.TrimSpace(content) == "" {
+		log.Fatal("❌ ファイルが空っぽです")
+	}
+
+	fmt.Println("🔎 テキスト解析中...")
+
+	recipes, rawResp, err := analyzeManualText(content, apiKey)
+	if err != nil {
+		log.Println("❌ AI解析エラー:", err)
+		fmt.Println(rawResp)
 		return
 	}
 
-	// ★修正: original_ingredients, original_process も保存
+	fmt.Printf("📦 %d 件のレシピを検出。\n", len(recipes))
+
+	for i, r := range recipes {
+		// 表示や保存の前に強制変換を適用する
+		applySubstitutions(&r)
+
+		fmt.Printf("\n[%d/%d] %s\n", i+1, len(recipes), r.Name)
+		printComparison(&r)
+		saveRecipe(db, &r, "手動入力")
+	}
+
+	fmt.Println("\n✨ 完了しました！")
+	os.WriteFile(inputPath, []byte(""), 0644)
+}
+
+func loadSubstitutions() {
+	nameSubstitutions = make(map[string]Substitution)
+
+	// ★修正: 探索パスのパターンを増やしました
+	// 1. カレントディレクトリ (tools/manual_importerで実行時)
+	// 2. tools/manual_importer/ (プロジェクトルートで実行時)
+	// 3. ../../ (念のため)
+	candidates := []string{
+		SUBST_FILE,
+		filepath.Join("tools", "manual_importer", SUBST_FILE),
+		filepath.Join("..", "..", SUBST_FILE),
+	}
+
+	var file *os.File
+	var err error
+	var foundPath string
+
+	for _, path := range candidates {
+		file, err = os.Open(path)
+		if err == nil {
+			foundPath = path
+			break
+		}
+	}
+
+	if file == nil {
+		fmt.Println("⚠️ 誤変換辞書(CSV)が見つかりません。辞書なしで続行します。")
+		// デバッグ: どこを探したか表示した方が親切な場合はコメントアウトを外してください
+		// fmt.Printf("(探索パス: %v)\n", candidates)
+		return
+	}
+	defer file.Close()
+
+	reader := csv.NewReader(file)
+	_, _ = reader.Read() // ヘッダースキップ
+	records, _ := reader.ReadAll()
+
+	for _, record := range records {
+		if len(record) < 2 {
+			continue
+		}
+		nameSubstitutions[record[0]] = Substitution{
+			TargetName: record[1],
+			Details:    strings.TrimSpace(getAt(record, 2)),
+		}
+	}
+	fmt.Printf("📚 誤変換辞書を読み込みました(%s): %d件\n", foundPath, len(nameSubstitutions))
+}
+
+func getAt(s []string, i int) string {
+	if i < len(s) {
+		return s[i]
+	}
+	return ""
+}
+
+// レシピデータに対して強制変換を適用する関数
+func applySubstitutions(r *GeneratedRecipe) {
+	for i := range r.Ingredients {
+		ing := &r.Ingredients[i]
+		if fix, ok := nameSubstitutions[ing.Name]; ok {
+			// fmt.Printf("    🔄 変換: %s -> %s\n", ing.Name, fix.TargetName)
+			ing.Name = fix.TargetName
+			if ing.Details != "" && fix.Details != "" {
+				ing.Details = fix.Details + " " + ing.Details
+			} else if fix.Details != "" {
+				ing.Details = fix.Details
+			}
+		}
+	}
+}
+
+func saveRecipe(db *sql.DB, r *GeneratedRecipe, sourceURL string) {
+	if r.Name == "" {
+		return
+	}
+	var exists int
+	db.QueryRow("SELECT count(*) FROM recipes WHERE name = ?", r.Name).Scan(&exists)
+	if exists > 0 {
+		fmt.Printf("    ⚠️ 登録済みのためスキップ\n")
+		return
+	}
+
+	var processText string
+	if r.Process != nil {
+		switch v := r.Process.(type) {
+		case string:
+			processText = v
+		case []interface{}:
+			var lines []string
+			for _, line := range v {
+				if str, ok := line.(string); ok {
+					lines = append(lines, str)
+				}
+			}
+			processText = strings.Join(lines, "\n")
+		default:
+			processText = fmt.Sprintf("%v", v)
+		}
+	}
+	if r.RawProcess == "" {
+		r.RawProcess = processText
+	}
+	if r.RawIngredients == "" {
+		b, _ := json.Marshal(r.Ingredients)
+		r.RawIngredients = string(b)
+	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		log.Println("Tx開始エラー:", err)
+		return
+	}
+
 	res, err := tx.Exec("INSERT INTO recipes(name, yield, process, original_ingredients, original_process, url) VALUES(?, ?, ?, ?, ?, ?)",
 		r.Name, r.Yield, processText, r.RawIngredients, r.RawProcess, sourceURL)
 	if err != nil {
@@ -483,26 +756,244 @@ func saveRecipe(db *sql.DB, r *GeneratedRecipe, sourceURL string) {
 		if ing.Name == "" {
 			continue
 		}
-		if utf8.RuneCountInString(ing.Name) > 15 || strings.Contains(ing.Name, "味変") {
+		if len([]rune(ing.Name)) > 20 || strings.Contains(ing.Name, "味変") {
 			continue
 		}
 
+		// DB検索
 		var catalogID int
 		db.QueryRow("SELECT id FROM item_catalog WHERE name = ?", ing.Name).Scan(&catalogID)
+
+		detailsToSave := ing.Details
+
 		if catalogID == 0 {
-			res, err := tx.Exec("INSERT INTO item_catalog(name, classification, category, default_unit) VALUES(?, ?, ?, ?)",
-				ing.Name, "食材", "未分類", "")
-			if err != nil {
-				continue
+			// AI名寄せ
+			fmt.Printf("    ❓ 未知: %s -> 名寄せ...", ing.Name)
+			norm, err := askGeminiNormalize(ing.Name, apiKey)
+
+			if err == nil && norm.StandardName != "" {
+				// 1. 標準名で検索
+				db.QueryRow("SELECT id FROM item_catalog WHERE name = ?", norm.StandardName).Scan(&catalogID)
+
+				// 2. カナで検索 (AIが「ナス(カナ:なす)」と返した場合、DBの「なす」にヒットさせる)
+				if catalogID == 0 && norm.Kana != "" {
+					db.QueryRow("SELECT id FROM item_catalog WHERE name = ?", norm.Kana).Scan(&catalogID)
+					if catalogID != 0 {
+						norm.StandardName = norm.Kana // ヒットしたら名前をDB側に合わせる
+					}
+				}
+
+				if catalogID != 0 {
+					fmt.Printf(" 💡 統合: %s (詳細:%s)\n", norm.StandardName, norm.Details)
+					if norm.Details != "" {
+						if detailsToSave != "" {
+							detailsToSave += " " + norm.Details
+						} else {
+							detailsToSave = norm.Details
+						}
+					}
+				} else {
+					fmt.Printf(" 🆕 新規: %s (%s)\n", norm.StandardName, norm.Kana)
+
+					// 新規登録
+					err := tx.QueryRow("SELECT id FROM item_catalog WHERE name = ?", norm.StandardName).Scan(&catalogID)
+					if err == sql.ErrNoRows {
+						res, err := tx.Exec("INSERT INTO item_catalog(name, kana, classification, category, default_unit) VALUES(?, ?, ?, ?, ?)",
+							norm.StandardName, norm.Kana, "食材", "未分類", "")
+						if err == nil {
+							nid, _ := res.LastInsertId()
+							catalogID = int(nid)
+						} else {
+							tx.QueryRow("SELECT id FROM item_catalog WHERE name = ?", norm.StandardName).Scan(&catalogID)
+						}
+					}
+
+					if norm.Details != "" {
+						if detailsToSave != "" {
+							detailsToSave += " " + norm.Details
+						} else {
+							detailsToSave = norm.Details
+						}
+					}
+				}
+			} else {
+				fmt.Printf(" -> そのまま登録\n")
+				err := tx.QueryRow("SELECT id FROM item_catalog WHERE name = ?", ing.Name).Scan(&catalogID)
+				if err == sql.ErrNoRows {
+					res, err := tx.Exec("INSERT INTO item_catalog(name, kana, classification, category, default_unit) VALUES(?, ?, ?, ?, ?)",
+						ing.Name, "", "食材", "未分類", "")
+					if err == nil {
+						nid, _ := res.LastInsertId()
+						catalogID = int(nid)
+					} else {
+						tx.QueryRow("SELECT id FROM item_catalog WHERE name = ?", ing.Name).Scan(&catalogID)
+					}
+				}
 			}
-			newID, _ := res.LastInsertId()
-			catalogID = int(newID)
 		}
-		tx.Exec("INSERT INTO recipe_ingredients(recipe_id, catalog_id, unit, amount, group_name) VALUES(?, ?, ?, ?, ?)",
-			recipeID, catalogID, "", ing.Amount, "")
+
+		if catalogID != 0 {
+			_, err := tx.Exec("INSERT INTO recipe_ingredients(recipe_id, catalog_id, unit, amount, group_name, details) VALUES(?, ?, ?, ?, ?, ?)",
+				recipeID, catalogID, "", ing.Amount, ing.Group, detailsToSave)
+			if err != nil {
+				log.Printf("    ❌ 材料保存エラー(%s): %v", ing.Name, err)
+			}
+		}
 	}
-	tx.Commit()
-	fmt.Printf("    ✅ 保存完了: %s\n", r.Name)
+
+	if err := tx.Commit(); err != nil {
+		log.Println("コミットエラー:", err)
+		return
+	}
+	fmt.Printf("    ✅ 保存完了\n")
+}
+
+func askGeminiNormalize(name, apiKey string) (*NormalizeResult, error) {
+	// AI指示: 野菜はひらがな優先
+	prompt := fmt.Sprintf(`
+食材名「%s」を正規化し、JSONで出力してください。
+
+【重要: 表記ルール】
+1. 一般的な野菜（なす、だいこん、にんじん、ピーマン等）は、生物学的なカタカナ表記ではなく、**料理データベースとして一般的な「ひらがな」または「一般的な漢字」** に統一してください。
+   例: ナス -> なす, 茄子 -> なす, ニラ -> ニラ(カタカナが一般的), ピーマン -> ピーマン
+2. 「standard_name」にはその統一した名称を入れてください。
+3. 「kana」には全角ひらがなの読みを入れてください。
+4. 「details」には形状や状態（粉末、みじん切り等）を入れてください。
+
+JSON形式:
+{"standard_name": "なす", "kana": "なす", "details": ""}
+`, name)
+
+	resStr, err := common.CallGemini(prompt, apiKey)
+	if err != nil {
+		return nil, err
+	}
+	var res NormalizeResult
+	if err := json.Unmarshal([]byte(resStr), &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func fixDatabaseSchema(db *sql.DB) {
+	db.Exec(`CREATE TABLE IF NOT EXISTS item_catalog (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		name TEXT NOT NULL UNIQUE,
+		kana TEXT,
+		classification TEXT NOT NULL,
+		category TEXT,
+		default_unit TEXT
+	);`)
+
+	db.Exec(`CREATE TABLE IF NOT EXISTS recipes (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		name TEXT NOT NULL UNIQUE,
+		yield TEXT,
+		process TEXT,
+		url TEXT,
+		original_ingredients TEXT DEFAULT '',
+		original_process TEXT DEFAULT '',
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	);`)
+
+	db.Exec(`CREATE TABLE IF NOT EXISTS recipe_ingredients (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		recipe_id INTEGER NOT NULL,
+		catalog_id INTEGER NOT NULL,
+		unit TEXT,
+		amount TEXT,
+		group_name TEXT,
+		details TEXT DEFAULT '',
+		FOREIGN KEY (recipe_id) REFERENCES recipes (id),
+		FOREIGN KEY (catalog_id) REFERENCES item_catalog (id)
+	);`)
+
+	sqls := []string{
+		"ALTER TABLE recipes ADD COLUMN original_ingredients TEXT DEFAULT ''",
+		"ALTER TABLE recipes ADD COLUMN original_process TEXT DEFAULT ''",
+		"ALTER TABLE recipe_ingredients ADD COLUMN details TEXT DEFAULT ''",
+		"ALTER TABLE item_catalog ADD COLUMN kana TEXT",
+	}
+	for _, q := range sqls {
+		db.Exec(q)
+	}
+}
+
+func analyzeManualText(text string, apiKey string) ([]GeneratedRecipe, string, error) {
+	prompt := `
+以下のテキストデータから、料理レシピの情報を抽出し、JSON配列で出力してください。
+【抽出ルール】
+- name: 料理名
+- yield: 何人分か
+- ingredients: 材料リスト
+    - name: 材料名
+      ※重要: "かき"等の同音異義語は、レシピの文脈（鍋なら"牡蠣"、デザートなら"柿"）から判断して適切な漢字に変換してください。
+    - amount: 分量 (単位込みで記述。例: "1/2本", "200g", "少々")
+    - group: グループ名（"A", "ソース"など。なければ空文字）
+    - details: 詳細情報・補足（例: "みじん切り", "冷凍", "飾り用"など。なければ空文字）
+- raw_ingredients: 材料リストの原文
+- process: 作り方の手順
+- raw_process: 作り方の原文
+【データ】
+` + text
+
+	resStr, err := common.CallGemini(prompt, apiKey)
+	if err != nil {
+		return nil, "", err
+	}
+
+	var recipes []GeneratedRecipe
+	if err := json.Unmarshal([]byte(resStr), &recipes); err != nil {
+		var single GeneratedRecipe
+		if err2 := json.Unmarshal([]byte(resStr), &single); err2 == nil {
+			return []GeneratedRecipe{single}, resStr, nil
+		}
+		return nil, resStr, fmt.Errorf("JSON解析失敗: %v", err)
+	}
+	return recipes, resStr, nil
+}
+
+func printComparison(r *GeneratedRecipe) {
+	fmt.Printf("🍳 %s\n", r.Name)
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 4, ' ', 0)
+	fmt.Fprintln(w, "【 原文 】\t|\t【 AI解析 (3列形式) 】")
+	fmt.Fprintln(w, "----------\t|\t-----------------------")
+
+	rawLines := strings.Split(strings.TrimSpace(r.RawIngredients), "\n")
+	var aiLines []string
+	for _, ing := range r.Ingredients {
+		line := fmt.Sprintf("%s : %s", ing.Name, ing.Amount)
+		if ing.Details != "" {
+			line += fmt.Sprintf(" (%s)", ing.Details)
+		}
+		if ing.Group != "" {
+			line += fmt.Sprintf(" <%s>", ing.Group)
+		}
+		aiLines = append(aiLines, line)
+	}
+
+	maxLen := len(rawLines)
+	if len(aiLines) > maxLen {
+		maxLen = len(aiLines)
+	}
+
+	for i := 0; i < maxLen; i++ {
+		left, right := "", ""
+		if i < len(rawLines) {
+			left = strings.TrimSpace(rawLines[i])
+			if len([]rune(left)) > 20 {
+				left = string([]rune(left)[:18]) + ".."
+			}
+		}
+		if i < len(aiLines) {
+			right = aiLines[i]
+		}
+		if left != "" || right != "" {
+			fmt.Fprintf(w, "%s\t|\t%s\n", left, right)
+		}
+	}
+	w.Flush()
+	fmt.Println("--------------------------------------------------")
 }
 
 
@@ -517,6 +1008,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"kimichan/tools/common"
@@ -548,10 +1040,14 @@ func main() {
 	}
 	defer db.Close()
 
-	fmt.Println("🧹 スーパーお掃除ロボット (よみがな絶対埋める版)、起動します...")
+	fmt.Println("🧹 スーパーお掃除ロボット (カテゴリ厳守版)、起動します...")
 
-	// 1. マスタCSV読み込み
+	// 1. マスタCSV読み込み & カテゴリリスト作成
 	masterMap := make(map[string]MasterRecord)
+	// 重複しないカテゴリリストを作るためのセット
+	categorySet := make(map[string]bool)
+	categorySet["その他"] = true // デフォルトで入れておく
+
 	csvPath := filepath.Join(wd, "seeds", "master_data.csv")
 	if _, err := os.Stat(csvPath); os.IsNotExist(err) {
 		csvPath = filepath.Join(wd, "..", "..", "seeds", "master_data.csv")
@@ -563,12 +1059,23 @@ func main() {
 		records, _ := reader.ReadAll()
 		for _, r := range records {
 			masterMap[r[0]] = MasterRecord{Classification: r[1], Category: r[2]}
+			if r[2] != "" {
+				categorySet[r[2]] = true
+			}
 		}
 		file.Close()
-		fmt.Printf("📚 マスタデータ %d 件をメモリに読み込みました。\n", len(masterMap))
+		fmt.Printf("📚 マスタデータ %d 件を読み込みました。\n", len(masterMap))
 	}
 
-	// 2. DBチェック（kanaも取得！）
+	// カテゴリリストを文字列化（AIへの指示用）
+	var validCategories []string
+	for cat := range categorySet {
+		validCategories = append(validCategories, cat)
+	}
+	validCategoriesStr := strings.Join(validCategories, ", ")
+	fmt.Printf("📋 有効カテゴリ: [%s]\n", validCategoriesStr)
+
+	// 2. DBチェック
 	rows, err := db.Query("SELECT id, name, kana, classification, category FROM item_catalog")
 	if err != nil {
 		log.Fatal(err)
@@ -577,7 +1084,7 @@ func main() {
 	type Target struct {
 		ID   int
 		Name string
-		Kana string // DBの現状のカナ
+		Kana string
 		Cls  string
 		Cat  string
 	}
@@ -594,34 +1101,30 @@ func main() {
 	fmt.Printf("📦 全 %d 件の食材を検査します。\n", len(targets))
 
 	for i, t := range targets {
-		// マスタにあるか？
+		// マスタ一致チェック
 		master, inMaster := masterMap[t.Name]
 
-		// ★スキップ判定（ここを厳しくした）
-		// 「マスタにあって、かつ情報が一致していて、かつカナも埋まっている」ならスキップ
 		if inMaster && t.Cls == master.Classification && t.Cat == master.Category && t.Kana != "" {
 			continue
 		}
 
 		fmt.Printf("[%d/%d] 補完中: %s ... ", i+1, len(targets), t.Name)
 
-		// AIに聞く（マスタにあっても、カナを知りたいから聞く）
-		res, err := askGeminiMaster(t.Name, cfg.GeminiApiKey)
+		// ★修正: AIに有効カテゴリリストを渡す
+		res, err := askGeminiMaster(t.Name, validCategoriesStr, cfg.GeminiApiKey)
 		if err != nil {
 			fmt.Printf("❌ AIエラー: %v\n", err)
 			continue
 		}
 
-		// ★ハイブリッド判定
-		// マスタにあるなら、分類とカテゴリはマスタを優先（強制上書き）
+		// マスタ優先（ハイブリッド）
 		if inMaster {
 			res.Classification = master.Classification
 			res.Category = master.Category
-			// 名前もマスタ通りに（表記ゆれ防止）
 			res.RealName = t.Name
 		}
 
-		// よみがなが空ならスキップしないように、変更フラグを立てる
+		// 変更があるかチェック
 		needsUpdate := false
 		if res.RealName != t.Name {
 			needsUpdate = true
@@ -629,12 +1132,16 @@ func main() {
 		if t.Cls == "" && res.Classification != "" {
 			needsUpdate = true
 		}
-		if t.Cat == "" && res.Category != "" {
+		// カテゴリが変わるか、または今のカテゴリが無効なもの（リストにない）だった場合も更新
+		if (t.Cat == "" && res.Category != "") || (t.Cat != res.Category) {
 			needsUpdate = true
 		}
 		if t.Kana == "" && res.Kana != "" {
 			needsUpdate = true
-		} // カナが埋まるなら更新！
+		}
+		if res.Details != "" {
+			needsUpdate = true
+		} // 詳細が分離されたら更新必須
 
 		if !needsUpdate {
 			fmt.Println("🆗 変更なし")
@@ -643,6 +1150,9 @@ func main() {
 
 		fmt.Printf("\n    👉 修正: [%s(%s)] 分類:%s / カテゴリ:%s\n",
 			res.RealName, res.Kana, res.Classification, res.Category)
+		if res.Details != "" {
+			fmt.Printf("       詳細分離: %s\n", res.Details)
+		}
 
 		if err := executeMasterClean(db, t.ID, res); err != nil {
 			fmt.Printf("    ❌ DB更新エラー: %v\n", err)
@@ -655,7 +1165,8 @@ func main() {
 	fmt.Println("\n✨ 全てのお掃除が完了しました！")
 }
 
-func askGeminiMaster(name, apiKey string) (*MasterCleanResult, error) {
+// ★修正: validCategoriesを受け取るように変更
+func askGeminiMaster(name, validCategories, apiKey string) (*MasterCleanResult, error) {
 	prompt := fmt.Sprintf(`
 食材名「%s」のデータを正規化してJSONで出力してください。
 
@@ -663,9 +1174,10 @@ func askGeminiMaster(name, apiKey string) (*MasterCleanResult, error) {
 1. real_name: 一般名称（「玉ねぎ(みじん切り)」→「玉ねぎ」）。
 2. kana: 全角ひらがなの読み（例: たまねぎ）。必須。
 3. classification: 「食材」か「調味料」。
-4. category: 「野菜」「肉」「魚介」「乾物」など。
+4. category: 以下のリストから最も適切なものを選択してください。これ以外の言葉は禁止です。
+   [ %s ]
 5. details: 補足情報（みじん切り、ソース用、Aなど）。なければ空文字。
-`, name)
+`, name, validCategories)
 
 	txt, err := common.CallGemini(prompt, apiKey)
 	if err != nil {
@@ -685,12 +1197,10 @@ func executeMasterClean(db *sql.DB, oldID int, res *MasterCleanResult) error {
 		return err
 	}
 
-	// 1. 名寄せ先（正しい名前）があるか探す
 	var masterID int
 	err = tx.QueryRow("SELECT id FROM item_catalog WHERE name = ?", res.RealName).Scan(&masterID)
 
 	if err == sql.ErrNoRows {
-		// ない -> 今のIDのまま、情報を更新する
 		query := `UPDATE item_catalog SET name=?, kana=?, classification=?, category=? WHERE id=?`
 		_, err = tx.Exec(query, res.RealName, res.Kana, res.Classification, res.Category, oldID)
 		if err != nil {
@@ -699,13 +1209,11 @@ func executeMasterClean(db *sql.DB, oldID int, res *MasterCleanResult) error {
 		}
 		masterID = oldID
 	} else {
-		// ある -> 既存のほう(masterID)のカナが空なら、埋めてあげる
 		if res.Kana != "" {
 			tx.Exec("UPDATE item_catalog SET kana = ? WHERE id = ? AND (kana IS NULL OR kana = '')", res.Kana, masterID)
 		}
 	}
 
-	// 2. 詳細情報の退避（レシピ側）
 	if res.Details != "" {
 		query := `UPDATE recipe_ingredients SET catalog_id = ?, details = CASE WHEN details = '' THEN ? ELSE details || ' ' || ? END WHERE catalog_id = ?`
 		_, err = tx.Exec(query, masterID, res.Details, res.Details, oldID)
@@ -714,7 +1222,6 @@ func executeMasterClean(db *sql.DB, oldID int, res *MasterCleanResult) error {
 			return err
 		}
 	} else if masterID != oldID {
-		// 詳細はないが、ID統合が必要な場合
 		_, err = tx.Exec("UPDATE recipe_ingredients SET catalog_id = ? WHERE catalog_id = ?", masterID, oldID)
 		if err != nil {
 			tx.Rollback()
@@ -722,7 +1229,6 @@ func executeMasterClean(db *sql.DB, oldID int, res *MasterCleanResult) error {
 		}
 	}
 
-	// 3. 古いIDの削除（統合された場合）
 	if masterID != oldID {
 		_, err = tx.Exec("DELETE FROM item_catalog WHERE id = ?", oldID)
 		if err != nil {
@@ -839,6 +1345,8 @@ import (
 
 var db *sql.DB
 
+// initDB関数は削除しました（main.goで直接処理しているため不要）
+
 func initDatabase() error {
 	const createCatalogSQL = `
 	CREATE TABLE IF NOT EXISTS item_catalog (
@@ -852,7 +1360,11 @@ func initDatabase() error {
 	if _, err := db.Exec(createCatalogSQL); err != nil {
 		return fmt.Errorf("item_catalog error: %w", err)
 	}
-
+	// カラム追加（マイグレーション）
+	// 既に存在する場合のエラーは無視する簡易実装（またはカラム存在チェックを入れるのが丁寧だが、個人開発ならこれで続行可）
+	// ここではエラーが出ても止まらないようにExecの結果をチェックしつつ、続行させる形が安全ですが
+	// SQLiteは ADD COLUMN IF NOT EXISTS をサポートしていないバージョンもあるため、
+	// 厳密にはチェックが必要。ただ、Goのドライバならエラーでも落ちないのでこのままでも稼働はします。
 	db.Exec("ALTER TABLE item_catalog ADD COLUMN kana TEXT;")
 
 	const createIngredientsSQL = `
@@ -871,15 +1383,6 @@ func initDatabase() error {
 		return fmt.Errorf("refrigerator_ingredients error: %w", err)
 	}
 	db.Exec("ALTER TABLE refrigerator_ingredients ADD COLUMN location TEXT;")
-
-	db.Exec("PRAGMA foreign_keys = OFF;")
-	db.Exec("CREATE TEMPORARY TABLE temp_table(id, catalog_id, amount, unit, expiration_date, location, created_at, updated_at);")
-	db.Exec("INSERT INTO temp_table SELECT id, catalog_id, amount, unit, expiration_date, location, created_at, updated_at FROM refrigerator_ingredients;")
-	db.Exec("DROP TABLE refrigerator_ingredients;")
-	db.Exec(createIngredientsSQL)
-	db.Exec("INSERT INTO refrigerator_ingredients SELECT * FROM temp_table;")
-	db.Exec("DROP TABLE temp_table;")
-	db.Exec("PRAGMA foreign_keys = ON;")
 
 	const createSeasoningsSQL = `
 	CREATE TABLE IF NOT EXISTS refrigerator_seasonings (
@@ -906,7 +1409,10 @@ func initDatabase() error {
 	if _, err := db.Exec(createRecipesSQL); err != nil {
 		return fmt.Errorf("recipes error: %w", err)
 	}
+	// 不足していたカラムを追加
 	db.Exec("ALTER TABLE recipes ADD COLUMN yield TEXT;")
+	db.Exec("ALTER TABLE recipes ADD COLUMN original_ingredients TEXT DEFAULT '';")
+	db.Exec("ALTER TABLE recipes ADD COLUMN original_process TEXT DEFAULT '';")
 
 	const createRecipeIngredientsSQL = `
 	CREATE TABLE IF NOT EXISTS recipe_ingredients (
@@ -916,6 +1422,7 @@ func initDatabase() error {
 		unit TEXT,
 		amount TEXT,
 		group_name TEXT,
+		details TEXT,
 		FOREIGN KEY (recipe_id) REFERENCES recipes (id),
 		FOREIGN KEY (catalog_id) REFERENCES item_catalog (id)
 	);`
@@ -925,25 +1432,7 @@ func initDatabase() error {
 
 	db.Exec("ALTER TABLE recipe_ingredients ADD COLUMN unit TEXT;")
 	db.Exec("ALTER TABLE recipe_ingredients ADD COLUMN group_name TEXT;")
-
-	const createLocationsSQL = `
-	CREATE TABLE IF NOT EXISTS locations (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		name TEXT NOT NULL UNIQUE,
-		priority INTEGER
-	);`
-	if _, err := db.Exec(createLocationsSQL); err != nil {
-		return fmt.Errorf("locations error: %w", err)
-	}
-
-	var count int
-	err := db.QueryRow("SELECT COUNT(*) FROM locations").Scan(&count)
-	if err == nil && count == 0 {
-		defaults := []string{"冷蔵庫", "野菜室", "冷凍庫", "チルド", "常温", "その他"}
-		for i, name := range defaults {
-			db.Exec("INSERT INTO locations(name, priority) VALUES(?, ?)", name, i+1)
-		}
-	}
+	db.Exec("ALTER TABLE recipe_ingredients ADD COLUMN details TEXT DEFAULT '';")
 
 	const createFridgePhotosSQL = `
 	CREATE TABLE IF NOT EXISTS fridge_photos (
@@ -957,11 +1446,8 @@ func initDatabase() error {
 	}
 	db.Exec("ALTER TABLE fridge_photos ADD COLUMN location TEXT;")
 
-	const updateSeasoningsSQL = `
-	UPDATE item_catalog
-	SET category = '', default_unit = 'g'
-	WHERE classification = '調味料';`
-	db.Exec(updateSeasoningsSQL)
+	// ★削除: 調味料のカテゴリを勝手に消すコードを削除しました
+	// const updateSeasoningsSQL = ... (削除)
 
 	fmt.Println("Database initialized.")
 	return nil
@@ -1085,7 +1571,6 @@ func handleCatalog(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// ★追加: 使用状況確認API (削除や変更の安全確認用)
 func handleCatalogUsage(w http.ResponseWriter, r *http.Request) {
 	idStr := r.URL.Query().Get("id")
 	if idStr == "" {
@@ -1094,14 +1579,12 @@ func handleCatalogUsage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var recipeCount int
-	// レシピで使われている数をカウント
 	err := db.QueryRow("SELECT COUNT(DISTINCT recipe_id) FROM recipe_ingredients WHERE catalog_id = ?", idStr).Scan(&recipeCount)
 	if err != nil {
 		sendJSONError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	// 具体的なレシピ名を3つまで取得
 	rows, err := db.Query("SELECT DISTINCT r.name FROM recipes r JOIN recipe_ingredients ri ON r.id = ri.recipe_id WHERE ri.catalog_id = ? LIMIT 3", idStr)
 	if err != nil {
 		sendJSONError(w, err.Error(), http.StatusInternalServerError)
@@ -1161,7 +1644,6 @@ func addCatalogItems(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 重複時は更新する (Upsert)
 	query := `
 	INSERT INTO item_catalog(name, kana, classification, category, default_unit) 
 	VALUES(?, ?, ?, ?, ?)
@@ -1171,7 +1653,6 @@ func addCatalogItems(w http.ResponseWriter, r *http.Request) {
 	category = excluded.category,
 	default_unit = excluded.default_unit
 	`
-
 	stmt, err := tx.Prepare(query)
 	if err != nil {
 		tx.Rollback()
@@ -1186,12 +1667,6 @@ func addCatalogItems(w http.ResponseWriter, r *http.Request) {
 			sendJSONError(w, "name required", http.StatusBadRequest)
 			return
 		}
-		// 調味料の場合はカテゴリと単位を固定化するなどのルールがあればここで適用
-		if item.Classification == "調味料" {
-			// item.Category = "" // 空にしたい場合
-			// item.DefaultUnit = "g"
-		}
-
 		_, err := stmt.Exec(item.Name, item.Kana, item.Classification, item.Category, item.DefaultUnit)
 		if err != nil {
 			tx.Rollback()
@@ -1204,9 +1679,7 @@ func addCatalogItems(w http.ResponseWriter, r *http.Request) {
 		sendJSONError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-
 	w.WriteHeader(http.StatusCreated)
-	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "success"})
 }
 
@@ -1220,7 +1693,6 @@ func updateCatalogItem(w http.ResponseWriter, r *http.Request) {
 		DefaultUnit    string `json:"default_unit"`
 		ForceMerge     bool   `json:"force_merge"`
 	}
-
 	var req UpdateReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		sendJSONError(w, err.Error(), http.StatusBadRequest)
@@ -1233,12 +1705,10 @@ func updateCatalogItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 名前変更時に重複チェック
 	var targetID int
 	err = tx.QueryRow("SELECT id FROM item_catalog WHERE name = ? AND id != ?", req.Name, req.ID).Scan(&targetID)
 
 	if err == nil {
-		// 重複あり
 		if !req.ForceMerge {
 			tx.Rollback()
 			w.Header().Set("Content-Type", "application/json")
@@ -1251,32 +1721,13 @@ func updateCatalogItem(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// 統合処理 (古いIDを使っていたデータを新しいIDに付け替え)
-		if _, err := tx.Exec("UPDATE refrigerator_ingredients SET catalog_id = ? WHERE catalog_id = ?", targetID, req.ID); err != nil {
-			tx.Rollback()
-			sendJSONError(w, "在庫マージ失敗", http.StatusInternalServerError)
-			return
-		}
-		if _, err := tx.Exec("UPDATE refrigerator_seasonings SET catalog_id = ? WHERE catalog_id = ?", targetID, req.ID); err != nil {
-			tx.Rollback()
-			sendJSONError(w, "調味料マージ失敗", http.StatusInternalServerError)
-			return
-		}
-		if _, err := tx.Exec("UPDATE recipe_ingredients SET catalog_id = ? WHERE catalog_id = ?", targetID, req.ID); err != nil {
-			tx.Rollback()
-			sendJSONError(w, "レシピマージ失敗", http.StatusInternalServerError)
-			return
-		}
-
-		// 古い方を削除
-		if _, err := tx.Exec("DELETE FROM item_catalog WHERE id = ?", req.ID); err != nil {
-			tx.Rollback()
-			sendJSONError(w, "旧アイテム削除失敗", http.StatusInternalServerError)
-			return
-		}
+		// 統合処理
+		tx.Exec("UPDATE refrigerator_ingredients SET catalog_id = ? WHERE catalog_id = ?", targetID, req.ID)
+		tx.Exec("UPDATE recipe_ingredients SET catalog_id = ? WHERE catalog_id = ?", targetID, req.ID)
+		// 調味料テーブルは無視
+		tx.Exec("DELETE FROM item_catalog WHERE id = ?", req.ID)
 
 	} else {
-		// 重複なし、普通に更新
 		query := `UPDATE item_catalog SET name=?, kana=?, classification=?, category=?, default_unit=? WHERE id=?`
 		if _, err := tx.Exec(query, req.Name, req.Kana, req.Classification, req.Category, req.DefaultUnit, req.ID); err != nil {
 			tx.Rollback()
@@ -1289,8 +1740,7 @@ func updateCatalogItem(w http.ResponseWriter, r *http.Request) {
 		sendJSONError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-
-	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]string{"status": "success"})
 }
 
@@ -1300,38 +1750,27 @@ func deleteCatalogItem(w http.ResponseWriter, r *http.Request) {
 		sendJSONError(w, "id required", http.StatusBadRequest)
 		return
 	}
-
 	var id int
 	fmt.Sscanf(idStr, "%d", &id)
 
-	// 使用状況チェック
+	// 使用チェック (調味料テーブルは見ない)
 	var count int
-	// レシピで使用中か？
 	db.QueryRow("SELECT count(*) FROM recipe_ingredients WHERE catalog_id = ?", id).Scan(&count)
 	if count > 0 {
-		sendJSONError(w, "この食材はレシピで使用されているため削除できません", http.StatusConflict)
+		sendJSONError(w, "レシピで使用中のため削除できません", http.StatusConflict)
 		return
 	}
-	// 在庫にあるか？
 	db.QueryRow("SELECT count(*) FROM refrigerator_ingredients WHERE catalog_id = ?", id).Scan(&count)
 	if count > 0 {
-		sendJSONError(w, "この食材は在庫にあるため削除できません", http.StatusConflict)
-		return
-	}
-	// 調味料リストにあるか？
-	db.QueryRow("SELECT count(*) FROM refrigerator_seasonings WHERE catalog_id = ?", id).Scan(&count)
-	if count > 0 {
-		sendJSONError(w, "この調味料はストックリストにあるため削除できません", http.StatusConflict)
+		sendJSONError(w, "在庫にあるため削除できません", http.StatusConflict)
 		return
 	}
 
-	// 削除実行
 	_, err := db.Exec("DELETE FROM item_catalog WHERE id = ?", id)
 	if err != nil {
 		sendJSONError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]string{"status": "deleted"})
 }
@@ -1942,11 +2381,13 @@ import (
 )
 
 type RecipeRequest struct {
-	Name    string `json:"name"`
-	Yield   string `json:"yield"`
-	Process string `json:"process"`
-	URL     string `json:"url"`
-	CsvData string `json:"csv_data"`
+	Name                string `json:"name"`
+	Yield               string `json:"yield"`
+	Process             string `json:"process"`
+	OriginalProcess     string `json:"original_process"`
+	URL                 string `json:"url"`
+	CsvData             string `json:"csv_data"`
+	OriginalIngredients string `json:"original_ingredients"`
 }
 
 type RecipeResponse struct {
@@ -1991,10 +2432,10 @@ func getRecipes(w http.ResponseWriter, r *http.Request) {
 	var args []interface{}
 
 	if filterIngredientID != "" {
-		query = `SELECT r.id, r.name, r.yield, r.process, r.url, r.created_at FROM recipes r JOIN recipe_ingredients ri ON r.id = ri.recipe_id WHERE ri.catalog_id = ? ORDER BY r.created_at DESC`
+		query = `SELECT r.id, r.name, r.yield, r.process, r.original_process, r.url, r.created_at, r.original_ingredients FROM recipes r JOIN recipe_ingredients ri ON r.id = ri.recipe_id WHERE ri.catalog_id = ? ORDER BY r.created_at DESC`
 		args = append(args, filterIngredientID)
 	} else {
-		query = `SELECT id, name, yield, process, url, created_at FROM recipes ORDER BY created_at DESC`
+		query = `SELECT id, name, yield, process, original_process, url, created_at, original_ingredients FROM recipes ORDER BY created_at DESC`
 	}
 
 	isCloud := os.Getenv("K_SERVICE") != ""
@@ -2012,11 +2453,13 @@ func getRecipes(w http.ResponseWriter, r *http.Request) {
 	recipes := []RecipeResponse{}
 	for rows.Next() {
 		var r RecipeResponse
-		var yield sql.NullString
-		if err := rows.Scan(&r.ID, &r.Name, &yield, &r.Process, &r.URL, &r.CreatedAt); err != nil {
+		var yield, origProc, origIng sql.NullString
+		if err := rows.Scan(&r.ID, &r.Name, &yield, &r.Process, &origProc, &r.URL, &r.CreatedAt, &origIng); err != nil {
 			continue
 		}
 		r.Yield = yield.String
+		r.OriginalProcess = origProc.String
+		r.OriginalIngredients = origIng.String
 		recipes = append(recipes, r)
 	}
 
@@ -2072,29 +2515,19 @@ func getRecipes(w http.ResponseWriter, r *http.Request) {
 		rowsInv.Close()
 	}
 
-	seasMap := make(map[int]bool)
-	rowsSeas, _ := db.Query("SELECT catalog_id FROM refrigerator_seasonings WHERE status != 'なし'")
-	if rowsSeas != nil {
-		for rowsSeas.Next() {
-			var cid int
-			rowsSeas.Scan(&cid)
-			seasMap[cid] = true
-		}
-		rowsSeas.Close()
-	}
-
 	for i := range recipes {
 		hasIng := true
 		hasSeas := true
 		ingredients := recipeIngMap[recipes[i].ID]
 
 		for _, ing := range ingredients {
+			inStock := invMap[ing.CatalogID]
 			if ing.Classification == "調味料" {
-				if !seasMap[ing.CatalogID] {
+				if !inStock {
 					hasSeas = false
 				}
 			} else {
-				if !invMap[ing.CatalogID] {
+				if !inStock {
 					hasIng = false
 				}
 			}
@@ -2133,11 +2566,13 @@ func saveRecipeCommon(w http.ResponseWriter, r *http.Request, id int) {
 		return
 	}
 
+	// 3列仕様: Amountに単位込み、Detailsを追加
 	type parsedIng struct {
 		CatalogID int
 		Unit      string
 		Amount    string
 		GroupName string
+		Details   string
 	}
 	var ingredients []parsedIng
 	var unknownItems []string
@@ -2148,8 +2583,9 @@ func saveRecipeCommon(w http.ResponseWriter, r *http.Request, id int) {
 		return
 	}
 
-	csvDataProcessed := strings.ReplaceAll(req.CsvData, "/", "\n")
-	scanner := bufio.NewScanner(strings.NewReader(csvDataProcessed))
+	// ★修正: 「/」を改行に変換する処理を削除しました
+	// そのまま req.CsvData を読み込みます
+	scanner := bufio.NewScanner(strings.NewReader(req.CsvData))
 	var currentGroup string
 
 	for scanner.Scan() {
@@ -2163,9 +2599,20 @@ func saveRecipeCommon(w http.ResponseWriter, r *http.Request, id int) {
 			continue
 		}
 
-		var name, amount, unit string
+		var name, amount, details string
 
-		if strings.Contains(line, "…") {
+		if strings.Contains(line, ",") {
+			parts := strings.Split(line, ",")
+			name = strings.TrimSpace(parts[0])
+			// 2列目: 分量(単位込み)
+			if len(parts) > 1 {
+				amount = strings.TrimSpace(parts[1])
+			}
+			// 3列目: 詳細
+			if len(parts) > 2 {
+				details = strings.TrimSpace(parts[2])
+			}
+		} else if strings.Contains(line, "…") {
 			parts := strings.SplitN(line, "…", 2)
 			name = strings.TrimSpace(parts[0])
 			if len(parts) > 1 {
@@ -2176,15 +2623,6 @@ func saveRecipeCommon(w http.ResponseWriter, r *http.Request, id int) {
 			name = strings.TrimSpace(parts[0])
 			if len(parts) > 1 {
 				amount = strings.TrimSpace(parts[1])
-			}
-		} else if strings.Contains(line, ",") {
-			parts := strings.Split(line, ",")
-			name = strings.TrimSpace(parts[0])
-			if len(parts) > 1 {
-				amount = strings.TrimSpace(parts[1])
-			}
-			if len(parts) > 2 {
-				unit = strings.TrimSpace(parts[2])
 			}
 		} else {
 			name = line
@@ -2203,9 +2641,10 @@ func saveRecipeCommon(w http.ResponseWriter, r *http.Request, id int) {
 
 		ingredients = append(ingredients, parsedIng{
 			CatalogID: catalogID,
-			Unit:      unit,
+			Unit:      "", // 単位カラムは空にする
 			Amount:    amount,
 			GroupName: currentGroup,
+			Details:   details,
 		})
 	}
 
@@ -2216,7 +2655,8 @@ func saveRecipeCommon(w http.ResponseWriter, r *http.Request, id int) {
 	}
 
 	if id == 0 {
-		res, err := tx.Exec("INSERT INTO recipes(name, yield, process, url) VALUES(?, ?, ?, ?)", req.Name, req.Yield, req.Process, req.URL)
+		res, err := tx.Exec("INSERT INTO recipes(name, yield, process, url, original_ingredients, original_process) VALUES(?, ?, ?, ?, ?, ?)",
+			req.Name, req.Yield, req.Process, req.URL, req.OriginalIngredients, req.OriginalProcess)
 		if err != nil {
 			tx.Rollback()
 			sendJSONError(w, err.Error(), http.StatusInternalServerError)
@@ -2225,7 +2665,8 @@ func saveRecipeCommon(w http.ResponseWriter, r *http.Request, id int) {
 		newID, _ := res.LastInsertId()
 		id = int(newID)
 	} else {
-		_, err := tx.Exec("UPDATE recipes SET name=?, yield=?, process=?, url=? WHERE id=?", req.Name, req.Yield, req.Process, req.URL, id)
+		_, err := tx.Exec("UPDATE recipes SET name=?, yield=?, process=?, url=?, original_ingredients=?, original_process=? WHERE id=?",
+			req.Name, req.Yield, req.Process, req.URL, req.OriginalIngredients, req.OriginalProcess, id)
 		if err != nil {
 			tx.Rollback()
 			sendJSONError(w, err.Error(), http.StatusInternalServerError)
@@ -2239,7 +2680,7 @@ func saveRecipeCommon(w http.ResponseWriter, r *http.Request, id int) {
 		}
 	}
 
-	ingStmt, err := tx.Prepare("INSERT INTO recipe_ingredients(recipe_id, catalog_id, unit, amount, group_name) VALUES(?, ?, ?, ?, ?)")
+	ingStmt, err := tx.Prepare("INSERT INTO recipe_ingredients(recipe_id, catalog_id, unit, amount, group_name, details) VALUES(?, ?, ?, ?, ?, ?)")
 	if err != nil {
 		tx.Rollback()
 		sendJSONError(w, err.Error(), http.StatusInternalServerError)
@@ -2248,7 +2689,7 @@ func saveRecipeCommon(w http.ResponseWriter, r *http.Request, id int) {
 	defer ingStmt.Close()
 
 	for _, ing := range ingredients {
-		if _, err := ingStmt.Exec(id, ing.CatalogID, ing.Unit, ing.Amount, ing.GroupName); err != nil {
+		if _, err := ingStmt.Exec(id, ing.CatalogID, ing.Unit, ing.Amount, ing.GroupName, ing.Details); err != nil {
 			tx.Rollback()
 			sendJSONError(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -2277,23 +2718,19 @@ func handleRecipeIngredients(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// ★修正: ri.catalog_id も取得する
 	query := `
 		SELECT 
 			c.name, 
 			ri.amount, 
 			ri.unit,
 			ri.group_name,
+			ri.details,
 			ri.catalog_id, 
-			CASE 
-				WHEN c.classification = '調味料' THEN 
-					(SELECT COUNT(*) FROM refrigerator_seasonings WHERE catalog_id = c.id AND status != 'なし')
-				ELSE 
-					(SELECT COUNT(*) FROM refrigerator_ingredients WHERE catalog_id = c.id)
-			END as stock_count
+			(SELECT COUNT(*) FROM refrigerator_ingredients WHERE catalog_id = c.id) as stock_count
 		FROM recipe_ingredients ri
 		JOIN item_catalog c ON ri.catalog_id = c.id
 		WHERE ri.recipe_id = ?
+		ORDER BY ri.id ASC
 	`
 
 	rows, err := db.Query(query, recipeID)
@@ -2308,7 +2745,8 @@ func handleRecipeIngredients(w http.ResponseWriter, r *http.Request) {
 		Amount    string `json:"amount"`
 		Unit      string `json:"unit"`
 		GroupName string `json:"group_name"`
-		CatalogID int    `json:"catalog_id"` // ★追加
+		Details   string `json:"details"`
+		CatalogID int    `json:"catalog_id"`
 		InStock   bool   `json:"in_stock"`
 	}
 
@@ -2316,127 +2754,19 @@ func handleRecipeIngredients(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var i ResIngredient
 		var stockCount int
-		var gn sql.NullString
-		if err := rows.Scan(&i.Name, &i.Amount, &i.Unit, &gn, &i.CatalogID, &stockCount); err != nil {
+		var gn, dt sql.NullString
+		if err := rows.Scan(&i.Name, &i.Amount, &i.Unit, &gn, &dt, &i.CatalogID, &stockCount); err != nil {
 			sendJSONError(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 		i.GroupName = gn.String
+		i.Details = dt.String
 		i.InStock = (stockCount > 0)
 		ingredients = append(ingredients, i)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(ingredients)
-}
-
-
------ C:\Users\wasab\OneDrive\デスクトップ\kimichan2\handlers_seasonings.go -----
-package main
-
-import (
-	"encoding/json"
-	"fmt"
-	"net/http"
-)
-
-func handleSeasonings(w http.ResponseWriter, r *http.Request) {
-	switch r.Method {
-	case "GET":
-		getSeasonings(w, r)
-	case "POST":
-		addSeasoning(w, r)
-	case "DELETE":
-		deleteSeasoning(w, r)
-	default:
-		http.Error(w, "サポートされていないメソッドです。", http.StatusMethodNotAllowed)
-	}
-}
-
-func getSeasonings(w http.ResponseWriter, _ *http.Request) {
-	const query = `
-		SELECT
-			s.id, s.catalog_id, s.status, s.created_at, s.updated_at,
-			c.name, c.classification, c.category
-		FROM refrigerator_seasonings s
-		JOIN item_catalog c ON s.catalog_id = c.id
-		ORDER BY c.kana ASC, c.name ASC; 
-` // ★修正: kana順を優先
-	rows, err := db.Query(query)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	defer rows.Close()
-
-	items := []Seasoning{}
-	for rows.Next() {
-		var item Seasoning
-		if err := rows.Scan(
-			&item.ID, &item.CatalogID, &item.Status, &item.CreatedAt, &item.UpdatedAt,
-			&item.Name, &item.Classification, &item.Category,
-		); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		items = append(items, item)
-	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(items)
-}
-
-func addSeasoning(w http.ResponseWriter, r *http.Request) {
-	var item Seasoning
-	if err := json.NewDecoder(r.Body).Decode(&item); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	if item.CatalogID == 0 {
-		http.Error(w, "catalog_idは必須です", http.StatusBadRequest)
-		return
-	}
-	if item.Status == "" {
-		item.Status = "あり"
-	}
-
-	stmt, err := db.Prepare("INSERT INTO refrigerator_seasonings(catalog_id, status) VALUES(?, ?)")
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	defer stmt.Close()
-
-	res, err := stmt.Exec(item.CatalogID, item.Status)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	id, _ := res.LastInsertId()
-	item.ID = int(id)
-
-	w.WriteHeader(http.StatusCreated)
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(item)
-}
-
-func deleteSeasoning(w http.ResponseWriter, r *http.Request) {
-	idStr := r.URL.Query().Get("id")
-	if idStr == "" {
-		http.Error(w, "id required", http.StatusBadRequest)
-		return
-	}
-
-	var id int
-	fmt.Sscanf(idStr, "%d", &id)
-
-	_, err := db.Exec("DELETE FROM refrigerator_seasonings WHERE id=?", id)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{"status": "deleted"})
 }
 
 
@@ -2467,10 +2797,8 @@ func main() {
 		log.Fatal(err)
 	}
 
-	// ★変更: "data" フォルダの中に保存するように書き換える
+	// データ保存場所
 	DataDir = filepath.Join(currentDir, "data")
-
-	// ★追加: dataフォルダがなければ作る
 	if err := os.MkdirAll(DataDir, 0755); err != nil {
 		log.Fatal(err)
 	}
@@ -2493,11 +2821,11 @@ func main() {
 
 	mux := http.NewServeMux()
 
+	// ハンドラ登録（調味料は削除済み）
 	mux.HandleFunc("/api/catalog", handleCatalog)
-	mux.HandleFunc("/api/catalog/usage", handleCatalogUsage) // 追加
+	mux.HandleFunc("/api/catalog/usage", handleCatalogUsage)
 	mux.HandleFunc("/api/catalog/export", exportCatalogCSV)
 	mux.HandleFunc("/api/ingredients", handleIngredients)
-	mux.HandleFunc("/api/seasonings", handleSeasonings)
 	mux.HandleFunc("/api/recipes", handleRecipes)
 	mux.HandleFunc("/api/recipes/ingredients", handleRecipeIngredients)
 	mux.HandleFunc("/api/locations", handleLocations)
@@ -2505,24 +2833,27 @@ func main() {
 	mux.HandleFunc("/api/upload", handleUpload)
 	mux.HandleFunc("/api/fridge_photos", handleFridgePhotos)
 
+	// 静的ファイル（画像とHTML）
 	mux.Handle("/images/", http.StripPrefix("/images/", http.FileServer(http.Dir(imagesPath))))
 
 	staticFS, _ := fs.Sub(staticFiles, "static")
 	mux.Handle("/", http.FileServer(http.FS(staticFS)))
 
 	fmt.Println("Server is running at http://localhost:8080")
+
+	// ★Basic認証を適用して起動
 	if err := http.ListenAndServe(":8080", basicAuth(mux)); err != nil {
 		log.Fatal(err)
 	}
 }
 
-// Basic認証を行うミドルウェア
+// Basic認証ミドルウェア
 func basicAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// ▼▼ ここでIDとパスワードを決めます ▼▼
-		const expectedUser = "wasabi"
-		const expectedPass = "karashi"
-		// ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
+		// ▼▼ ここでIDとパスワードを設定してください ▼▼
+		const expectedUser = "wasabi"  // ← 好きなIDに変更
+		const expectedPass = "karashi" // ← 好きなパスワードに変更
+		// ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
 
 		user, pass, ok := r.BasicAuth()
 		if !ok || user != expectedUser || pass != expectedPass {
@@ -2562,7 +2893,7 @@ type Ingredient struct {
 	CreatedAt      string  `json:"created_at"`
 	UpdatedAt      string  `json:"updated_at"`
 	Name           string  `json:"name,omitempty"`
-	Kana           string  `json:"kana,omitempty"` // ★追加: よみがな
+	Kana           string  `json:"kana,omitempty"`
 	RecipeCount    int     `json:"recipe_count"`
 }
 
@@ -2578,14 +2909,16 @@ type Seasoning struct {
 }
 
 type Recipe struct {
-	ID          int                `json:"id"`
-	Name        string             `json:"name"`
-	Yield       string             `json:"yield"`
-	Process     string             `json:"process"`
-	URL         string             `json:"url"`
-	SourceType  string             `json:"source_type"`
-	CreatedAt   string             `json:"created_at"`
-	Ingredients []RecipeIngredient `json:"ingredients,omitempty"`
+	ID                  int                `json:"id"`
+	Name                string             `json:"name"`
+	Yield               string             `json:"yield"`
+	Process             string             `json:"process"`
+	OriginalProcess     string             `json:"original_process"` // ★追加
+	URL                 string             `json:"url"`
+	SourceType          string             `json:"source_type"`
+	CreatedAt           string             `json:"created_at"`
+	Ingredients         []RecipeIngredient `json:"ingredients,omitempty"`
+	OriginalIngredients string             `json:"original_ingredients"` // ★追加
 }
 
 type RecipeIngredient struct {
@@ -2600,7 +2933,7 @@ type RecipeIngredient struct {
 type FridgePhoto struct {
 	ID        int    `json:"id"`
 	ImagePath string `json:"image_path"`
-	Location  string `json:"location"` // 追加
+	Location  string `json:"location"`
 	CreatedAt string `json:"created_at"`
 }
 

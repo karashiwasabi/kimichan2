@@ -1,8 +1,14 @@
 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
     <div style="display:flex; gap:10px; align-items:center; flex:1;">
-        <select id="catalog-category-filter" class="input-field" style="padding:8px; font-size:14px; font-weight:bold;">
+        <select id="catalog-classification-filter" class="input-field" style="padding:8px; font-size:14px; font-weight:bold; width:100px;">
+            <option value="すべて">全分類</option>
+            <option value="食材">食材</option>
+            <option value="調味料">調味料</option>
+        </select>
+
+        <select id="catalog-category-filter" class="input-field" style="padding:8px; font-size:14px; font-weight:bold; flex:1;">
             <option value="すべて">すべてのカテゴリ</option>
-            </select>
+        </select>
     </div>
     <div style="margin-left:10px;">
         <a href="/api/catalog/export" class="btn" style="padding:8px 12px; font-size:12px; background:#eee; color:#666; text-decoration:none; border-radius:4px;">
@@ -64,11 +70,11 @@
                     </select>
                 </div>
                 
-                <div class="form-group">
+                <div class="form-group" id="form-group-category">
                     <label class="label">カテゴリ</label>
                     <select id="select-category" class="input-field">
-                        </select>
-                    </div>
+                    </select>
+                </div>
 
                 <div class="form-group">
                     <label class="label">よみがな</label>
