@@ -1,8 +1,11 @@
 // グローバル変数
 let catalogData = [];
-let currentCategory = 'すべて';
+// ★変更: 固定カテゴリリストを定義 (マスタCSVと同じもの)
+const FIXED_CATEGORIES = [
+    "野菜", "肉", "肉加工品", "魚介", "缶詰", "卵・乳製品", 
+    "大豆製品", "調味料", "乾物・粉類", "麺類", "パン", "穀物", "その他"
+];
 
-// 初期化 (app.jsから呼ばれる)
 function initCatalog() {
     fetchCatalog();
     // catalog_edit.js にあるセットアップ関数を呼ぶ
@@ -17,37 +20,34 @@ function fetchCatalog() {
         .then(res => res.json())
         .then(data => {
             catalogData = data;
-            renderCategoryButtons(catalogData);
-            filterAndRender();
+            setupCategoryFilter(); // フィルタ準備
+            filterAndRender();     // 初期表示
         })
         .catch(err => console.error('Fetch error:', err));
 }
 
-// カテゴリフィルタボタンの描画
-function renderCategoryButtons(items) {
-    const container = document.getElementById('category-filters');
-    if (!container) return;
+// ★修正: プルダウンの選択肢を作る
+function setupCategoryFilter() {
+    const select = document.getElementById('catalog-category-filter');
+    if (!select) return;
 
-    const categories = new Set(['すべて']);
-    items.forEach(item => {
-        if (item.category) categories.add(item.category);
-        else if (item.classification === '調味料') categories.add('調味料');
-        else categories.add('未分類');
+    // 一旦クリア
+    select.innerHTML = '<option value="すべて">すべてのカテゴリ</option>';
+
+    // 固定リストから選択肢を作成
+    FIXED_CATEGORIES.forEach(cat => {
+        const opt = document.createElement('option');
+        opt.value = cat;
+        opt.textContent = cat;
+        select.appendChild(opt);
     });
-
-    container.innerHTML = '';
-    categories.forEach(cat => {
-        const displayCat = cat === '未分類' ? 'その他' : cat;
-        const btn = document.createElement('div');
-        btn.className = `cat-chip ${cat === currentCategory ? 'active' : ''}`;
-        btn.textContent = displayCat;
-        btn.onclick = () => {
-            currentCategory = cat;
-            document.querySelectorAll('.cat-chip').forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
-            filterAndRender();
-        };
-        container.appendChild(btn);
+    
+    // 未分類のものがある場合のために、データ内の独自カテゴリも追加するか？
+    // 今回は「固定リスト」で運用するため、あえて追加しない（"その他"に含める）方針とします
+    
+    // イベントリスナー
+    select.addEventListener('change', () => {
+        filterAndRender();
     });
 }
 
@@ -56,6 +56,8 @@ function filterAndRender() {
     const term = document.getElementById('catalog-search').value.toLowerCase();
     const sortOrder = document.getElementById('sort-order').value;
     const filterNoKana = document.getElementById('filter-no-kana').checked;
+    // ★プルダウンの値を取得
+    const selectedCategory = document.getElementById('catalog-category-filter').value;
     
     let displayData = [...catalogData];
     
@@ -72,11 +74,14 @@ function filterAndRender() {
 
     // フィルタ処理
     const filtered = displayData.filter(item => {
-        // カテゴリ
+        // ★カテゴリフィルタ
         let catMatch = true;
-        if (currentCategory !== 'すべて') {
-            const itemCat = item.category || (item.classification === '調味料' ? '調味料' : '未分類');
-            catMatch = (itemCat === currentCategory);
+        if (selectedCategory !== 'すべて') {
+            // アイテムのカテゴリが空なら「その他」、それ以外はそのまま比較
+            const itemCat = item.category || (item.classification === '調味料' ? '調味料' : 'その他');
+            // 固定リストに含まれないカテゴリは「その他」として扱うか、部分一致にするか
+            // ここではシンプルに完全一致で判定
+            catMatch = (itemCat === selectedCategory);
         }
 
         // 検索語句
@@ -84,8 +89,7 @@ function filterAndRender() {
         if (term) {
             termMatch = 
                 item.name.toLowerCase().includes(term) || 
-                (item.kana && item.kana.toLowerCase().includes(term)) ||
-                (item.category && item.category.toLowerCase().includes(term));
+                (item.kana && item.kana.toLowerCase().includes(term));
         }
 
         // よみがな未登録
@@ -115,14 +119,13 @@ function renderCatalog(items) {
     items.forEach(item => {
         const div = document.createElement('div');
         div.className = 'card';
-        // catalog_edit.js の関数を呼ぶ
         div.onclick = () => {
             if (typeof openCatalogEditModal === 'function') {
                 openCatalogEditModal(item);
             }
         };
         
-        const tagText = `${item.classification} / ${item.category || (item.classification === '調味料' ? 'スパイス等' : '未分類')}`;
+        const tagText = `${item.classification} / ${item.category || '未分類'}`;
         
         const kanaHtml = item.kana 
             ? `<span style="font-size:11px; color:#999; font-weight:normal; margin-left:5px;">(${item.kana})</span>` 

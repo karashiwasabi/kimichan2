@@ -444,156 +444,262 @@ header {
 }
 
 ----- C:\Users\wasab\OneDrive\デスクトップ\kimichan2\static\css\views.css -----
-/* 冷蔵庫スナップショットエリア */
-.fridge-snapshot-area {
-    display: flex;
-    overflow-x: auto;
-    gap: 10px;
-    padding-bottom: 5px;
-    margin-bottom: 15px;
-    margin-top: 5px;
-    border-bottom: 1px dashed #eee;
-    min-height: 110px;
-}
-.fridge-snapshot-area::-webkit-scrollbar {
-    display: none;
-}
-
-.snapshot-card {
-    flex: 0 0 133px; /* 4:3比率基準: 高さ100pxなら幅133px */
-    height: 100px;
-    position: relative;
-    border-radius: 12px;
-    overflow: hidden;
-    background: #f0f0f0;
-    border: 1px solid #ddd;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-}
-
-.snapshot-img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    cursor: pointer;
-    display: block;
-}
-
-.btn-add-snapshot {
-    flex: 0 0 80px;
-    height: 100px;
-    background: #fff;
-    border: 2px dashed #ccc;
-    border-radius: 12px;
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    align-items: center;
-    cursor: pointer;
-    color: #999;
-    font-size: 10px;
-    font-weight: bold;
-}
-
-.btn-delete-snapshot {
-    position: absolute;
-    top: 5px;
-    right: 5px;
-    background: rgba(0,0,0,0.5);
-    color: white;
-    width: 24px;
-    height: 24px;
-    border-radius: 50%;
-    border: none;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    font-size: 14px;
-    cursor: pointer;
+/* --- レイアウト調整 --- */
+.search-area {
+    margin-bottom: 10px;
+    padding: 5px 10px;
+    background: var(--bg-color);
+    position: sticky;
+    top: 0;
     z-index: 10;
 }
 
-/* モーダルでの写真拡大 */
-.modal-image-view {
-    width: 100%;
-    height: auto;
-    max-height: 80vh;
-    object-fit: contain;
+#inventory-list, #catalog-list, #recipe-list {
+    padding-bottom: 80px;
 }
 
-/* カタログ画面用 */
-.category-wrapper {
-    display: flex;
+/* --- カテゴリタブ・選択モーダル --- */
+/* ★横並び強制設定 */
+.category-wrapper, .selector-tabs {
+    display: flex !important;
+    flex-wrap: nowrap !important;
     align-items: center;
-    gap: 5px;
-    margin-bottom: 10px;
-}
-.scroll-btn {
-    background: var(--card-bg);
-    border: 1px solid #eee;
-    border-radius: 50%;
-    width: 30px;
-    height: 30px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    color: var(--text-sub);
-    flex-shrink: 0;
-    font-size: 12px;
-}
-.category-scroll {
-    display: flex;
-    overflow-x: auto;
     gap: 8px;
-    padding-bottom: 5px;
-    scrollbar-width: none;
-    flex: 1;
-    scroll-behavior: smooth;
+    overflow-x: auto;
+    padding: 5px 0 10px 0;
+    margin-bottom: 5px;
+    -webkit-overflow-scrolling: touch;
 }
-.category-scroll::-webkit-scrollbar {
-    display: none;
-}
-.cat-chip {
-    background: var(--card-bg);
-    border: 1px solid #eee;
-    padding: 6px 12px;
+
+.cat-chip, .selector-tab {
+    flex: 0 0 auto; /* ★縮小禁止 */
+    background: white;
+    border: 1px solid #ddd;
+    padding: 6px 14px;
     border-radius: 20px;
     font-size: 12px;
     white-space: nowrap;
-    color: var(--text-sub);
+    color: #555;
     cursor: pointer;
-    transition: 0.2s;
 }
-.cat-chip.active {
+.cat-chip.active, .selector-tab.active {
     background: var(--primary-color);
     color: white;
     border-color: var(--primary-color);
     font-weight: bold;
 }
 
-/* レシピ画面用 */
-.recipe-group-header {
-    background: #fff3e0;
-    color: #e67e22;
-    padding: 5px 10px;
-    border-radius: 4px;
-    font-size: 12px;
-    font-weight: bold;
-    margin-top: 10px;
-    margin-bottom: 5px;
+/* --- 共通カードスタイル --- */
+.card {
+    background: var(--card-bg);
+    border-radius: var(--border-radius);
+    padding: 12px 16px;
+    margin-bottom: 12px;
+    box-shadow: var(--shadow-soft);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    cursor: pointer;
 }
-.ing-status-ok {
-    color: #27ae60;
-    font-weight: bold;
+.card:active {
+    transform: scale(0.98);
 }
-.ing-status-missing {
-    color: #e74c3c;
+
+/* コンテンツレイアウト */
+.card-content {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+.card-content-wrapper {
+    display: flex; 
+    align-items: center;
+    flex: 1;
+    width: 100%;
+}
+.card-text-area {
+    flex: 1; 
+    margin-left: 12px;
+    overflow: hidden;
+}
+.card-tag-row {
+    display: flex; 
+    align-items: center;
+    margin-bottom: 4px;
+}
+.card-name-row {
+    display: flex; 
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+}
+
+.item-name {
     font-weight: bold;
-    background: #fee;
+    color: var(--text-main);
+    font-size: 16px;
+}
+.tag {
+    font-size: 10px;
     padding: 2px 6px;
     border-radius: 4px;
+    background: #eee;
+    color: #666;
+    display: inline-block;
+    margin-right: 5px;
+}
+.item-unit {
+    font-size: 14px;
+    font-weight: bold;
+    color: var(--text-main);
+    margin-left: 10px;
+    white-space: nowrap;
+}
+
+/* --- 在庫リスト専用 --- */
+.loc-header-badge {
+    background-color: #e0e0e0;
+    color: #333;
+    padding: 6px 12px;
+    border-radius: 6px;
+    font-weight: bold;
+    font-size: 14px;
+    margin-top: 20px;
+    margin-bottom: 8px;
+    margin-left: 4px;
+}
+.inventory-empty-msg {
+    font-size: 12px;
+    color: #ccc;
+    padding: 20px;
+    text-align: center;
+}
+
+/* 期限表示 */
+.date-tag {
+    font-weight: bold;
+    font-size: 11px;
+    padding: 2px 6px;
+    border-radius: 4px;
+    background: #f0f0f0;
+}
+.status-expired { color: #e74c3c; background: #fadbd8; }
+.status-soon    { color: #3498db; background: #d6eaf8; }
+.status-normal  { color: #555; }
+.stock-status-ok { color: #27ae60; font-weight: bold; font-size: 12px; }
+
+/* レシピバッジ・ボタン */
+.recipe-badge-btn {
+    background: #e67e22;
+    color: white;
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: bold;
+    margin-left: 8px;
+    border: none;
+    cursor: pointer;
+    display: inline-block;
+}
+
+/* クイック追加ボタン */
+.btn-quick-add {
+    background: #3498db;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    padding: 4px 10px;
+    font-size: 11px;
+    cursor: pointer;
+    margin-left: auto;
+}
+
+/* --- 入力フォーム・モーダル --- */
+.btn-open-selector {
+    width: 100%;
+    text-align: left;
+    background: white;
+    border: 1px solid #ccc;
+    padding: 12px;
+    border-radius: 8px;
+    color: #333;
+    font-size: 16px;
+}
+.modal-selector-body {
+    height: 70vh;
+    display: flex;
+    flex-direction: column;
+}
+.selector-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 10px;
+}
+.selector-item {
+    padding: 14px;
+    border-bottom: 1px solid #eee;
+    cursor: pointer;
+    font-size: 16px;
+}
+.selector-item-kana {
+    font-size: 12px;
+    color: #999;
+    margin-left: 8px;
+}
+
+/* 写真エリア */
+.fridge-snapshot-area {
+    display: flex;
+    overflow-x: auto;
+    gap: 10px;
+    padding: 5px 10px 15px 10px;
+    border-bottom: 1px dashed #eee;
+    min-height: 120px;
+}
+.snapshot-card {
+    flex: 0 0 100px;
+    height: 100px;
+    position: relative;
+    border-radius: 8px;
+    overflow: hidden;
+    background: #f0f0f0;
+    border: 1px solid #ddd;
+}
+.snapshot-img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+.btn-add-snapshot {
+    flex: 0 0 80px;
+    height: 100px;
+    background: #fff;
+    border: 2px dashed #ccc;
+    border-radius: 8px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    color: #999;
+    font-size: 10px;
+    font-weight: bold;
+    cursor: pointer;
+}
+.btn-delete-snapshot {
+    position: absolute;
+    top: 2px;
+    right: 2px;
+    width: 24px;
+    height: 24px;
+    background: rgba(0,0,0,0.6);
+    color: white;
+    border-radius: 50%;
+    border: none;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    cursor: pointer;
 }
 
 ----- C:\Users\wasab\OneDrive\デスクトップ\kimichan2\static\views\catalog_view.html -----
@@ -635,25 +741,24 @@ header {
         <div class="modal-scroll-area">
             <input type="hidden" id="edit-id">
             <input type="hidden" id="original-unit">
-            <input type="hidden" id="original-name"> <div class="tab-group" style="margin-bottom:15px;">
+            <input type="hidden" id="original-name">
+
+            <div class="tab-group" style="margin-bottom:15px;">
                 <button type="button" id="tab-single" class="tab-btn active">個別入力</button>
                 <button type="button" id="tab-csv" class="tab-btn">一括登録</button>
             </div>
 
             <div id="form-single">
-                
                 <div class="form-group">
-                    <label class="label">食材名 (入力すると下に類似候補が出ます)</label>
+                    <label class="label">食材名</label>
                     <input type="text" id="input-name" class="input-field" placeholder="例: キャベツ">
                 </div>
-
                 <div id="reference-area" style="display:none; background:#f0f8ff; padding:10px; border-radius:8px; margin-bottom:15px; border:1px solid #dbeafe;">
                     <div style="font-size:11px; font-weight:bold; color:#4a90e2; margin-bottom:5px;">
-                        💡 類似・参考アイテム (クリックで分類・カテゴリをコピー)
+                        💡 類似・参考アイテム (クリックで統合)
                     </div>
                     <div id="reference-list" style="display:flex; flex-wrap:wrap; gap:5px;"></div>
                 </div>
-
                 <div class="form-group">
                     <label class="label">分類</label>
                     <select id="input-classification" class="input-field">
@@ -670,7 +775,6 @@ header {
                          <input type="text" id="input-category" class="input-field" style="flex:1;" placeholder="新規カテゴリ名">
                     </div>
                 </div>
-
                 <div class="form-group">
                     <label class="label">よみがな (任意)</label>
                     <input type="text" id="input-kana" class="input-field" placeholder="例: きゃべつ">
@@ -678,20 +782,20 @@ header {
                 <div class="form-group">
                     <label class="label">単位</label>
                     <input type="text" id="input-unit" class="input-field" placeholder="例: 個, g">
-                    <p style="font-size:10px; color:#e74c3c; margin-top:4px;">※単位を変えると在庫数の意味が変わる場合があります。</p>
                 </div>
             </div>
 
             <div id="form-csv" style="display:none;">
                 <div class="form-group">
-                    <label class="label">CSV貼り付け (品名,分類,カテゴリ,単位,よみがな)</label>
-                    <p style="font-size:11px; color:#999; margin-bottom:5px;">例: キャベツ,食材,野菜,個,きゃべつ</p>
-                    <textarea id="input-csv-text" class="textarea-field" placeholder="キャベツ,食材,野菜,個,きゃべつ&#13;&#10;豚バラ,食材,肉類,g,ぶたばら&#13;&#10;醤油,調味料,,g,しょうゆ"></textarea>
+                    <label class="label">CSV貼り付け</label>
+                    <textarea id="input-csv-text" class="textarea-field" placeholder="品名,分類,カテゴリ,単位,よみがな"></textarea>
                 </div>
-                <div id="csv-result-area" class="result" style="display:none; margin-top: 10px; padding: 10px; background-color: #e8f5e9; border: 1px solid #c8e6c9; border-radius: 8px;"></div>
+                <div id="csv-result-area" class="result" style="display:none;"></div>
             </div>
         </div>
+
         <div class="btn-row">
+            <button id="btn-delete-catalog" class="btn btn-delete" style="display:none; margin-right:auto; background-color:#e74c3c; color:white;">削除</button>
             <button id="btn-cancel" class="btn btn-cancel">キャンセル</button>
             <button id="btn-save" class="btn btn-save">保存</button>
         </div>
@@ -699,135 +803,130 @@ header {
 </div>
 
 ----- C:\Users\wasab\OneDrive\デスクトップ\kimichan2\static\views\inventory_view.html -----
-<div class="fridge-snapshot-area" id="fridge-snapshot-list">
-    </div>
-<input type="file" id="snapshot-file" accept="image/*" capture="environment" style="display:none;">
-
-<div class="search-area">
-    <input type="text" id="inventory-search" class="search-input" placeholder="冷蔵庫の中身を検索...">
-</div>
-
-<div id="inventory-list" class="card-list">
+<div class="fab-wrapper">
+    <div id="inventory-list" class="card-list"></div>
 </div>
 
 <button id="fab-add-inventory" class="fab">＋</button>
 
+<input type="file" id="snapshot-file" accept="image/*" style="display:none;">
+
+<div class="search-area">
+    <input type="text" id="inventory-search" class="search-input" placeholder="在庫を検索...">
+</div>
+
 <div id="modal-inventory" class="modal-overlay">
     <div class="modal-sheet">
         <div class="modal-header">食材を追加</div>
-        
         <div class="modal-scroll-area">
-            <div class="form-group">
-                <label class="label">食材を選ぶ</label>
-                <select id="inv-select-catalog" class="input-field">
-                    <option value="">カタログから選択...</option>
-                </select>
-            </div>
             
+            <input type="hidden" id="inv-select-catalog-id">
+
+            <div class="form-group">
+                <label class="label">食材</label>
+                <button id="btn-open-selector" class="btn-open-selector">
+                    食材を選択してください...
+                </button>
+            </div>
+
             <div class="form-group">
                 <label class="label">保管場所</label>
-                <div style="display:flex; gap:10px;">
-                    <select id="inv-location" class="input-field" style="flex:1;">
-                        </select>
-                    <button type="button" id="btn-manage-loc" style="padding:0 12px; border:1px solid #eee; background:#fff; border-radius:12px; cursor:pointer;">⚙</button>
+                <select id="inv-location" class="input-field"></select>
+            </div>
+
+            <div class="form-group">
+                <label class="label">詳細設定</label>
+                <div class="toggle-switch">
+                    <input type="checkbox" id="inv-detail-toggle">
+                    <label for="inv-detail-toggle">数量・期限を入力する</label>
                 </div>
             </div>
 
-            <div style="border-top:1px dashed #eee; margin:15px 0;"></div>
-
-            <div class="form-group" style="display:flex; align-items:center; justify-content:space-between;">
-                <label class="label" style="margin:0; font-size:14px; color:#333;">詳細（数量・期限）を入力する</label>
-                <input type="checkbox" id="inv-detail-toggle" style="transform:scale(1.3);">
-            </div>
-
-            <div id="inv-detail-area" style="display:none; background:#f9f9f9; padding:10px; border-radius:8px; margin-bottom:15px;">
+            <div id="inv-detail-area" style="display:none;">
                 <div class="form-group">
-                    <label class="label">数量</label>
-                    <div class="stepper-container" style="background:#fff;">
-                        <div class="stepper-display">
-                            <button type="button" class="stepper-btn" id="btn-minus" onclick="addAmount(-1)">－</button>
-                            <input type="number" id="inv-amount" class="stepper-value" placeholder="0" value="1">
-                            <button type="button" class="stepper-btn" id="btn-plus" onclick="addAmount(1)">＋</button>
-                            <span id="inv-unit-display" style="font-size:14px; color:#666;"></span>
-                        </div>
-                        <div class="preset-chips">
-                            <div class="preset-chip" onclick="addAmount(0.5)">+0.5</div>
-                            <div class="preset-chip" onclick="addAmount(1)">+1</div>
-                            <div class="preset-chip" onclick="addAmount(10)">+10</div>
-                        </div>
+                    <label class="label">数量・単位</label>
+                    <div style="display:flex; gap:10px;">
+                        <input type="number" id="inv-amount" class="input-field" placeholder="1" style="flex:1;">
+                        <input type="text" id="inv-unit" class="input-field" placeholder="個" style="flex:1;">
                     </div>
-                    <input type="hidden" id="inv-unit">
+                    <div style="display:flex; gap:5px; margin-top:5px;">
+                        <button class="btn-small" onclick="addAmount(1)">+1</button>
+                        <button class="btn-small" onclick="addAmount(0.5)">+0.5</button>
+                        <button class="btn-small" onclick="addAmount(-1)">-1</button>
+                    </div>
                 </div>
-
                 <div class="form-group">
                     <label class="label">賞味期限</label>
-                    <input type="date" id="inv-date" class="input-field" style="background:#fff;">
+                    <input type="date" id="inv-date" class="input-field">
+                </div>
+                <div class="form-group">
+                    <label class="label">写真 (任意)</label>
+                    <input type="file" id="inv-file" accept="image/*">
+                    <img id="inv-preview" class="preview-img" style="display:none;">
+                    <input type="hidden" id="inv-image-path">
                 </div>
             </div>
         </div>
-
         <div class="btn-row">
-            <button id="btn-inv-cancel" class="btn btn-cancel">やめる</button>
-            <button id="btn-inv-save" class="btn btn-save">在庫にする</button>
+            <button id="btn-inv-cancel" class="btn btn-cancel">キャンセル</button>
+            <button id="btn-inv-save" class="btn btn-save">保存</button>
         </div>
     </div>
 </div>
 
 <div id="modal-inv-edit" class="modal-overlay">
     <div class="modal-sheet">
-        <div class="modal-header" id="inv-edit-title">食材の管理</div>
-        <input type="hidden" id="inv-edit-id">
-        
+        <div class="modal-header" id="inv-edit-title">編集</div>
         <div class="modal-scroll-area">
-            <div class="form-group">
-                <label class="label">現在の数量 (-1 は数量なし)</label>
-                <div style="display:flex; gap:10px;">
-                    <input type="number" id="inv-edit-amount" class="input-field">
-                    <div id="inv-edit-unit" style="padding:12px; background:#f9f9f9; border-radius:8px;"></div>
-                </div>
-            </div>
-
+            <input type="hidden" id="inv-edit-id">
             <div class="form-group">
                 <label class="label">保管場所</label>
                 <select id="inv-edit-location" class="input-field"></select>
             </div>
-
+            <div class="form-group">
+                <label class="label">数量</label>
+                <input type="number" id="inv-edit-amount" class="input-field">
+                <span id="inv-edit-unit" style="margin-left:5px;"></span>
+            </div>
             <div class="form-group">
                 <label class="label">賞味期限</label>
                 <input type="date" id="inv-edit-date" class="input-field">
             </div>
-        </div>
-
-        <div class="btn-row">
-            <button id="btn-inv-delete" class="btn" style="background:#e74c3c; color:white;">使い切った (削除)</button>
-            <button id="btn-inv-update" class="btn btn-save">変更を保存</button>
-        </div>
-        <div style="margin-top:10px; text-align:center;">
-            <a href="#" id="btn-inv-edit-cancel" style="font-size:12px; color:#999;">閉じる</a>
-        </div>
-    </div>
-</div>
-
-<div id="modal-loc-manage" class="modal-overlay" style="z-index:300;">
-    <div class="modal-sheet">
-        <div class="modal-header">保管場所の設定</div>
-        <div class="modal-scroll-area">
-            <ul id="loc-manage-list" class="location-manage-list"></ul>
-            <div style="display:flex; gap:10px; margin-top:15px;">
-                <input type="text" id="new-loc-name" class="input-field" placeholder="新しい場所名">
-                <button id="btn-add-loc" class="btn btn-save" style="flex:0 0 60px;">追加</button>
+            <div class="form-group">
+                <label class="label">写真変更</label>
+                <input type="file" id="inv-edit-file" accept="image/*">
+                <img id="inv-edit-preview" class="preview-img" style="display:none;">
+                <input type="hidden" id="inv-edit-image-path">
             </div>
         </div>
         <div class="btn-row">
-            <button id="btn-loc-close" class="btn btn-cancel">閉じる</button>
+            <button id="btn-inv-delete" class="btn btn-delete">削除</button>
+            <button id="btn-inv-edit-cancel" class="btn btn-cancel">キャンセル</button>
+            <button id="btn-inv-update" class="btn btn-save">更新</button>
         </div>
     </div>
 </div>
 
-<div id="modal-photo-view" class="modal-overlay" style="z-index:400; background:rgba(0,0,0,0.9);">
-    <div style="position:relative; max-width:100%; text-align:center;">
+<div id="modal-item-selector" class="modal-overlay">
+    <div class="modal-sheet" style="height: 80vh;">
+        <div class="modal-header">
+            食材を選ぶ
+            <button id="btn-selector-close" style="float:right; background:none; border:none; font-size:14px;">✕</button>
+        </div>
+        <div class="modal-selector-body">
+            <div style="padding:10px;">
+                <input type="text" id="selector-search" class="search-input" placeholder="なまえ、かなで検索...">
+            </div>
+            <div id="selector-tabs" class="selector-tabs"></div>
+            <div id="selector-list" class="selector-list"></div>
+        </div>
+    </div>
+</div>
+
+<div id="modal-photo-view" class="modal-overlay" style="background: rgba(0,0,0,0.9); z-index: 9999;">
+    <div style="width:100%; height:100%; display:flex; align-items:center; justify-content:center; position:relative;">
         <img id="photo-view-img" class="modal-image-view">
-        <button id="btn-photo-close" style="position:absolute; top:-40px; right:10px; color:white; background:none; border:none; font-size:24px;">✕ 閉じる</button>
+        <button id="btn-photo-close" style="position:absolute; top:20px; right:20px; background:white; border:none; padding:10px; border-radius:50%; font-size:20px;">×</button>
     </div>
 </div>
 
@@ -1236,7 +1335,8 @@ header {
     
     <script src="js/inventory_locations.js"></script>
     <script src="js/inventory_photos.js"></script>
-    <script src="js/inventory.js"></script>
+    <script src="js/inventory_list.js"></script>
+    <script src="js/inventory_edit.js"></script>
     <script src="js/seasoning_fetch.js"></script>
     <script src="js/seasoning_ui.js"></script>
     <script src="js/recipe_list.js"></script>

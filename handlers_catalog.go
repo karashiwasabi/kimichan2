@@ -15,12 +15,13 @@ func handleCatalog(w http.ResponseWriter, r *http.Request) {
 		addCatalogItems(w, r)
 	case "PUT":
 		updateCatalogItem(w, r)
+	case "DELETE": // ★追加
+		deleteCatalogItem(w, r)
 	default:
 		sendJSONError(w, "Method Not Allowed", http.StatusMethodNotAllowed)
 	}
 }
 
-// 追加: 使用状況確認API
 func handleCatalogUsage(w http.ResponseWriter, r *http.Request) {
 	idStr := r.URL.Query().Get("id")
 	if idStr == "" {
@@ -103,7 +104,6 @@ func addCatalogItems(w http.ResponseWriter, r *http.Request) {
 	category = excluded.category,
 	default_unit = excluded.default_unit
 	`
-
 	stmt, err := tx.Prepare(query)
 	if err != nil {
 		tx.Rollback()
@@ -118,12 +118,6 @@ func addCatalogItems(w http.ResponseWriter, r *http.Request) {
 			sendJSONError(w, "name required", http.StatusBadRequest)
 			return
 		}
-		if item.Classification == "調味料" {
-			item.Category = ""
-			item.DefaultUnit = "g"
-		}
-		item.DefaultUnit = ""
-
 		_, err := stmt.Exec(item.Name, item.Kana, item.Classification, item.Category, item.DefaultUnit)
 		if err != nil {
 			tx.Rollback()
@@ -136,9 +130,7 @@ func addCatalogItems(w http.ResponseWriter, r *http.Request) {
 		sendJSONError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-
 	w.WriteHeader(http.StatusCreated)
-	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "success"})
 }
 
@@ -152,7 +144,6 @@ func updateCatalogItem(w http.ResponseWriter, r *http.Request) {
 		DefaultUnit    string `json:"default_unit"`
 		ForceMerge     bool   `json:"force_merge"`
 	}
-
 	var req UpdateReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		sendJSONError(w, err.Error(), http.StatusBadRequest)
@@ -180,35 +171,13 @@ func updateCatalogItem(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
-
-		if _, err := tx.Exec("UPDATE refrigerator_ingredients SET catalog_id = ? WHERE catalog_id = ?", targetID, req.ID); err != nil {
-			tx.Rollback()
-			sendJSONError(w, "在庫マージ失敗", http.StatusInternalServerError)
-			return
-		}
-		if _, err := tx.Exec("UPDATE refrigerator_seasonings SET catalog_id = ? WHERE catalog_id = ?", targetID, req.ID); err != nil {
-			tx.Rollback()
-			sendJSONError(w, "調味料マージ失敗", http.StatusInternalServerError)
-			return
-		}
-		if _, err := tx.Exec("UPDATE recipe_ingredients SET catalog_id = ? WHERE catalog_id = ?", targetID, req.ID); err != nil {
-			tx.Rollback()
-			sendJSONError(w, "レシピマージ失敗", http.StatusInternalServerError)
-			return
-		}
-
-		if _, err := tx.Exec("DELETE FROM item_catalog WHERE id = ?", req.ID); err != nil {
-			tx.Rollback()
-			sendJSONError(w, "旧アイテム削除失敗", http.StatusInternalServerError)
-			return
-		}
-
+		// 統合処理
+		tx.Exec("UPDATE refrigerator_ingredients SET catalog_id = ? WHERE catalog_id = ?", targetID, req.ID)
+		tx.Exec("UPDATE refrigerator_seasonings SET catalog_id = ? WHERE catalog_id = ?", targetID, req.ID)
+		tx.Exec("UPDATE recipe_ingredients SET catalog_id = ? WHERE catalog_id = ?", targetID, req.ID)
+		tx.Exec("DELETE FROM item_catalog WHERE id = ?", req.ID)
 	} else {
 		query := `UPDATE item_catalog SET name=?, kana=?, classification=?, category=?, default_unit=? WHERE id=?`
-		if req.Classification == "調味料" {
-			req.Category = ""
-			req.DefaultUnit = "g"
-		}
 		if _, err := tx.Exec(query, req.Name, req.Kana, req.Classification, req.Category, req.DefaultUnit, req.ID); err != nil {
 			tx.Rollback()
 			sendJSONError(w, "更新失敗: "+err.Error(), http.StatusInternalServerError)
@@ -220,7 +189,43 @@ func updateCatalogItem(w http.ResponseWriter, r *http.Request) {
 		sendJSONError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-
-	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]string{"status": "success"})
+}
+
+// ★追加: 削除機能
+func deleteCatalogItem(w http.ResponseWriter, r *http.Request) {
+	idStr := r.URL.Query().Get("id")
+	if idStr == "" {
+		sendJSONError(w, "id required", http.StatusBadRequest)
+		return
+	}
+	var id int
+	fmt.Sscanf(idStr, "%d", &id)
+
+	// 使用チェック
+	var count int
+	db.QueryRow("SELECT count(*) FROM recipe_ingredients WHERE catalog_id = ?", id).Scan(&count)
+	if count > 0 {
+		sendJSONError(w, "レシピで使用中のため削除できません", http.StatusConflict)
+		return
+	}
+	db.QueryRow("SELECT count(*) FROM refrigerator_ingredients WHERE catalog_id = ?", id).Scan(&count)
+	if count > 0 {
+		sendJSONError(w, "在庫にあるため削除できません", http.StatusConflict)
+		return
+	}
+	db.QueryRow("SELECT count(*) FROM refrigerator_seasonings WHERE catalog_id = ?", id).Scan(&count)
+	if count > 0 {
+		sendJSONError(w, "調味料リストにあるため削除できません", http.StatusConflict)
+		return
+	}
+
+	_, err := db.Exec("DELETE FROM item_catalog WHERE id = ?", id)
+	if err != nil {
+		sendJSONError(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{"status": "deleted"})
 }

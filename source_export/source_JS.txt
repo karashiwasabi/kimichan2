@@ -56,6 +56,8 @@ function setupCatalogUI() {
     const overlay = document.getElementById('modal-overlay');
     const btnCancel = document.getElementById('btn-cancel');
     const btnSave = document.getElementById('btn-save');
+    // HTML側に追加が必要な削除ボタン
+    const btnDelete = document.getElementById('btn-delete-catalog');
     
     const tabSingle = document.getElementById('tab-single');
     const tabCsv = document.getElementById('tab-csv');
@@ -85,8 +87,13 @@ function setupCatalogUI() {
         document.getElementById('edit-id').value = '';
         document.getElementById('original-name').value = ''; // 新規なので空
         
+        // 削除ボタンは新規登録時は隠す
+        if(btnDelete) btnDelete.style.display = 'none';
+
         // 現在のカテゴリを選択状態にする
-        updateCategorySelect(currentCategory !== 'すべて' && currentCategory !== '未分類' ? currentCategory : '');
+        // currentCategoryは catalog_list.js のグローバル変数想定
+        const currentCat = (typeof currentCategory !== 'undefined' && currentCategory !== 'すべて' && currentCategory !== '未分類') ? currentCategory : '';
+        updateCategorySelect(currentCat);
         
         overlay.classList.add('active');
     });
@@ -95,6 +102,15 @@ function setupCatalogUI() {
         overlay.classList.remove('active');
         removeConflictUI();
     });
+
+    // 削除ボタンイベント
+    if (btnDelete) {
+        btnDelete.addEventListener('click', () => {
+            const id = document.getElementById('edit-id').value;
+            const name = document.getElementById('input-name').value;
+            if(id) deleteCatalogItem(id, name);
+        });
+    }
 
     // リスト側のフィルタ関数を呼び出すイベント
     if (typeof filterAndRender === 'function') {
@@ -157,10 +173,11 @@ function resetModal(titleText) {
     switchTab('single');
 }
 
-function openCatalogEditModal(item) {
+async function openCatalogEditModal(item) {
     resetModal('アイテム編集');
     
     const overlay = document.getElementById('modal-overlay');
+    const btnDelete = document.getElementById('btn-delete-catalog');
     
     document.getElementById('edit-id').value = item.id;
     document.getElementById('original-unit').value = item.default_unit || '';
@@ -172,6 +189,22 @@ function openCatalogEditModal(item) {
     document.getElementById('input-name').value = item.name;
     document.getElementById('input-kana').value = item.kana || '';
     document.getElementById('input-unit').value = item.default_unit;
+
+    // ★削除ボタンの制御 (使用状況チェック)
+    if (btnDelete) {
+        btnDelete.style.display = 'none'; // 一旦隠す
+        try {
+            const res = await fetch(`/api/catalog/usage?id=${item.id}`);
+            const usage = await res.json();
+            
+            // レシピに使われていなければ削除ボタンを表示
+            if (usage.recipe_count === 0) {
+                btnDelete.style.display = 'inline-block';
+            }
+        } catch(e) {
+            console.error('Usage check failed:', e);
+        }
+    }
 
     if (item.name) {
         updateReferenceList(item.name);
@@ -285,7 +318,7 @@ function applyReferenceItem(item) {
     document.getElementById('input-unit').value = item.default_unit || '';
 }
 
-// --- 保存処理 ---
+// --- 保存・削除処理 ---
 
 async function saveSingleItem() {
     const id = document.getElementById('edit-id').value;
@@ -367,6 +400,28 @@ async function saveSingleItem() {
     })
     .catch(err => {
         if (err.message !== 'キャンセルしました') alert('エラー: ' + err.message);
+    });
+}
+
+function deleteCatalogItem(id, name) {
+    if (!confirm(`本当に「${name}」をカタログから削除しますか？\n（この操作は取り消せません）`)) return;
+
+    fetch(`/api/catalog?id=${id}`, { method: 'DELETE' })
+    .then(res => {
+        if (!res.ok) {
+            // エラーハンドリング (API未実装など)
+            return res.text().then(text => { throw new Error(text || res.statusText) });
+        }
+        return res.json();
+    })
+    .then(() => {
+        alert('削除しました');
+        document.getElementById('modal-overlay').classList.remove('active');
+        if (typeof fetchCatalog === 'function') fetchCatalog();
+    })
+    .catch(err => {
+        console.error(err);
+        alert('削除できませんでした。\n(サーバー側で削除機能が許可されていない可能性があります)');
     });
 }
 
@@ -1034,6 +1089,445 @@ function saveCsvItem() {
     .catch(err => alert('エラー: ' + err.message));
 }
 
+----- C:\Users\wasab\OneDrive\デスクトップ\kimichan2\static\js\inventory_edit.js -----
+let catalogListForInv = [];
+let currentSelectorCategory = 'すべて';
+const FIXED_LOCATIONS_EDIT = ["冷蔵室", "チルド", "冷凍室", "野菜室", "その他"];
+
+function initInventoryEdit() {
+    setupLocationSelects();
+    fetchCatalogForInv();
+    setupEditEventListeners();
+}
+
+function fetchCatalogForInv() {
+    fetch('/api/catalog')
+        .then(res => res.json())
+        .then(data => {
+            // 調味料は除外
+            let filteredData = data.filter(item => item.classification !== '調味料');
+            filteredData.sort((a, b) => {
+                const ka = a.kana || a.name;
+                const kb = b.kana || b.name;
+                return ka.localeCompare(kb, 'ja');
+            });
+            catalogListForInv = filteredData;
+        });
+}
+
+function setupLocationSelects() {
+    const ids = ['inv-location', 'inv-edit-location'];
+    ids.forEach(id => {
+        const select = document.getElementById(id);
+        if (!select) return;
+        const current = select.value;
+        select.innerHTML = '';
+        FIXED_LOCATIONS_EDIT.forEach(loc => {
+            const opt = document.createElement('option');
+            opt.value = loc;
+            opt.textContent = loc;
+            select.appendChild(opt);
+        });
+        if (current && FIXED_LOCATIONS_EDIT.includes(current)) select.value = current;
+        else select.value = FIXED_LOCATIONS_EDIT[0];
+    });
+}
+
+function setupEditEventListeners() {
+    // --- モーダルを開く (新規) ---
+    const fab = document.getElementById('fab-add-inventory');
+    if (fab) {
+        fab.onclick = () => {
+            // リセット処理
+            document.getElementById('inv-detail-toggle').checked = false;
+            document.getElementById('inv-detail-area').style.display = 'none';
+            document.getElementById('inv-amount').value = 1; 
+            document.getElementById('inv-unit').value = "";
+            document.getElementById('inv-select-catalog-id').value = ""; // IDリセット
+            
+            const btn = document.getElementById('btn-open-selector');
+            if(btn) {
+                btn.textContent = "食材を選択してください...";
+                btn.style.fontWeight = 'normal';
+                btn.style.color = '#333';
+            }
+            setupLocationSelects();
+            document.getElementById('modal-inventory').classList.add('active');
+        };
+    }
+
+    // キャンセルボタン
+    const btnCancel = document.getElementById('btn-inv-cancel');
+    if (btnCancel) btnCancel.onclick = () => document.getElementById('modal-inventory').classList.remove('active');
+    
+    const btnEditCancel = document.getElementById('btn-inv-edit-cancel');
+    if (btnEditCancel) btnEditCancel.onclick = () => document.getElementById('modal-inv-edit').classList.remove('active');
+
+    // --- 保存ボタン (ここが重要！) ---
+    const btnSave = document.getElementById('btn-inv-save');
+    if (btnSave) {
+        btnSave.onclick = () => {
+            // IDを取得
+            const idInput = document.getElementById('inv-select-catalog-id');
+            const val = idInput ? idInput.value : "";
+            
+            if (!val) {
+                alert('食材が選択されていません。「食材を選択してください」ボタンを押して選んでください。');
+                return;
+            }
+            
+            const catalogId = parseInt(val, 10);
+            if (isNaN(catalogId)) {
+                alert('食材IDが不正です。もう一度選び直してください。');
+                return;
+            }
+
+            const location = document.getElementById('inv-location').value;
+            const unit = document.getElementById('inv-unit').value;
+            let amount = -1;
+            let date = "";
+            
+            if (document.getElementById('inv-detail-toggle').checked) {
+                amount = parseFloat(document.getElementById('inv-amount').value) || 1;
+                date = document.getElementById('inv-date').value;
+            }
+            let expirationDate = date ? date + "T00:00:00Z" : "";
+
+            const data = {
+                catalog_id: catalogId,
+                amount: amount,
+                unit: unit,
+                expiration_date: expirationDate,
+                location: location
+            };
+
+            fetch('/api/ingredients', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(data)
+            })
+            .then(async res => {
+                if (!res.ok) {
+                    const txt = await res.text();
+                    throw new Error(txt || res.statusText);
+                }
+                document.getElementById('modal-inventory').classList.remove('active');
+                if(window.fetchInventory) window.fetchInventory(); // リスト更新
+            })
+            .catch(err => {
+                console.error("Save Error:", err);
+                alert('保存できませんでした: ' + err.message);
+            });
+        };
+    }
+
+    // 更新
+    const btnUpdate = document.getElementById('btn-inv-update');
+    if (btnUpdate) {
+        btnUpdate.onclick = () => {
+            const id = document.getElementById('inv-edit-id').value;
+            const amount = parseFloat(document.getElementById('inv-edit-amount').value);
+            const date = document.getElementById('inv-edit-date').value;
+            const location = document.getElementById('inv-edit-location').value;
+
+            const data = {
+                id: parseInt(id),
+                amount: amount,
+                expiration_date: date ? date + "T00:00:00Z" : "",
+                location: location
+            };
+
+            fetch('/api/ingredients', {
+                method: 'PUT',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(data)
+            }).then(async res => {
+                if(!res.ok) throw new Error(await res.text());
+                document.getElementById('modal-inv-edit').classList.remove('active');
+                if(window.fetchInventory) window.fetchInventory();
+            }).catch(err => alert('更新エラー: ' + err));
+        };
+    }
+
+    // 削除
+    const btnDelete = document.getElementById('btn-inv-delete');
+    if (btnDelete) {
+        btnDelete.onclick = () => {
+            if(!confirm('削除しますか？')) return;
+            const id = document.getElementById('inv-edit-id').value;
+            fetch(`/api/ingredients?id=${id}`, { method: 'DELETE' })
+            .then(async res => {
+                if(!res.ok) throw new Error(await res.text());
+                document.getElementById('modal-inv-edit').classList.remove('active');
+                if(window.fetchInventory) window.fetchInventory();
+            }).catch(err => alert('削除エラー: ' + err));
+        };
+    }
+
+    setupItemSelector();
+}
+
+// 選択モーダル UI制御
+function setupItemSelector() {
+    const btnOpen = document.getElementById('btn-open-selector');
+    const modal = document.getElementById('modal-item-selector');
+    const btnClose = document.getElementById('btn-selector-close');
+    const searchInput = document.getElementById('selector-search');
+
+    if(!btnOpen || !modal) return;
+
+    btnOpen.onclick = () => {
+        modal.classList.add('active');
+        renderSelectorCategories();
+        renderSelectorList();
+    };
+    if(btnClose) btnClose.onclick = () => modal.classList.remove('active');
+    
+    if(searchInput) {
+        searchInput.oninput = () => renderSelectorList();
+    }
+}
+
+function renderSelectorCategories() {
+    const container = document.getElementById('selector-tabs');
+    if (!container) return;
+    container.innerHTML = '';
+    const categories = new Set(['すべて']);
+    catalogListForInv.forEach(item => {
+        if(item.category) categories.add(item.category);
+        else categories.add('未分類');
+    });
+    categories.forEach(cat => {
+        const div = document.createElement('div');
+        div.className = `selector-tab ${cat === currentSelectorCategory ? 'active' : ''}`;
+        div.textContent = cat;
+        div.onclick = () => {
+            currentSelectorCategory = cat;
+            renderSelectorCategories();
+            renderSelectorList();
+        };
+        container.appendChild(div);
+    });
+}
+
+function renderSelectorList() {
+    const container = document.getElementById('selector-list');
+    const term = document.getElementById('selector-search').value.toLowerCase();
+    container.innerHTML = '';
+
+    const filtered = catalogListForInv.filter(item => {
+        let catMatch = (currentSelectorCategory === 'すべて') || (item.category === currentSelectorCategory);
+        let termMatch = true;
+        if(term) {
+            termMatch = item.name.toLowerCase().includes(term) || (item.kana && item.kana.toLowerCase().includes(term));
+        }
+        return catMatch && termMatch;
+    });
+
+    if (filtered.length === 0) {
+        container.innerHTML = '<div style="padding:10px; color:#999;">該当なし</div>';
+        return;
+    }
+
+    filtered.forEach(item => {
+        const div = document.createElement('div');
+        div.className = 'selector-item';
+        div.innerHTML = `${item.name} <span class="selector-item-kana">${item.kana || ''}</span>`;
+        
+        // ★選択時の処理 (IDをセット)
+        div.onclick = () => {
+            document.getElementById('inv-select-catalog-id').value = item.id;
+            
+            const btn = document.getElementById('btn-open-selector');
+            btn.textContent = item.name;
+            btn.style.fontWeight = 'bold';
+            btn.style.color = '#000';
+            
+            document.getElementById('inv-unit').value = item.default_unit || '';
+            document.getElementById('modal-item-selector').classList.remove('active');
+        };
+        container.appendChild(div);
+    });
+}
+
+window.openInventoryEdit = function(item) {
+    const modal = document.getElementById('modal-inv-edit');
+    if (!modal) return;
+    document.getElementById('inv-edit-title').textContent = item.name;
+    document.getElementById('inv-edit-id').value = item.id;
+    document.getElementById('inv-edit-amount').value = item.amount;
+    document.getElementById('inv-edit-unit').textContent = item.unit;
+    document.getElementById('inv-edit-date').value = item.expiration_date.split('T')[0];
+
+    setupLocationSelects();
+    const locSelect = document.getElementById('inv-edit-location');
+    let loc = item.location;
+    if (!FIXED_LOCATIONS_EDIT.includes(loc)) loc = 'その他';
+    locSelect.value = loc;
+    
+    modal.classList.add('active');
+};
+
+window.addAmount = function(val) {
+    const input = document.getElementById('inv-amount');
+    let current = parseFloat(input.value) || 0;
+    let nextVal = current + val;
+    if (nextVal < 0) nextVal = 0;
+    input.value = Math.round(nextVal * 10) / 10;
+};
+
+----- C:\Users\wasab\OneDrive\デスクトップ\kimichan2\static\js\inventory_list.js -----
+let inventoryData = [];
+const FIXED_LOCATIONS = ["冷蔵室", "チルド", "冷凍室", "野菜室", "その他"];
+
+function initInventory() {
+    if (window.fetchFridgePhotos) window.fetchFridgePhotos();
+    fetchInventory();
+    
+    // 編集・写真UIの初期化
+    if (typeof initInventoryEdit === 'function') initInventoryEdit();
+    if (typeof setupPhotoUI === 'function') setupPhotoUI();
+}
+
+window.fetchInventory = function() {
+    return fetch('/api/ingredients')
+        .then(res => res.json())
+        .then(data => {
+            inventoryData = data;
+            const searchInput = document.getElementById('inventory-search');
+            if (searchInput && searchInput.value) {
+                const term = searchInput.value.toLowerCase().trim();
+                const filtered = inventoryData.filter(item => 
+                    item.name.toLowerCase().includes(term) || 
+                    (item.kana && item.kana.toLowerCase().includes(term))
+                );
+                renderInventory(filtered);
+            } else {
+                renderInventory(inventoryData);
+            }
+        })
+        .catch(err => console.error(err));
+};
+
+function renderInventory(items) {
+    const listEl = document.getElementById('inventory-list');
+    if (!listEl) return;
+    listEl.innerHTML = '';
+
+    const itemsByLoc = {};
+    FIXED_LOCATIONS.forEach(loc => itemsByLoc[loc] = []);
+    
+    items.forEach(item => {
+        let loc = item.location || 'その他';
+        if (!FIXED_LOCATIONS.includes(loc)) loc = 'その他';
+        itemsByLoc[loc].push(item);
+    });
+
+    FIXED_LOCATIONS.forEach(loc => {
+        const locItems = itemsByLoc[loc] || [];
+
+        // ヘッダー
+        const header = document.createElement('div');
+        header.className = 'loc-header-badge';
+        header.textContent = loc;
+        listEl.appendChild(header);
+
+        // 写真エリア
+        if (typeof window.renderLocationPhotos === 'function') {
+            const photoStrip = window.renderLocationPhotos(loc);
+            listEl.appendChild(photoStrip);
+        }
+
+        // アイテム
+        if (locItems.length === 0) {
+            const emptyMsg = document.createElement('div');
+            emptyMsg.className = 'inventory-empty-msg';
+            emptyMsg.textContent = '（在庫なし）';
+            listEl.appendChild(emptyMsg);
+        } else {
+            locItems.forEach(item => {
+                const div = document.createElement('div');
+                div.className = 'card';
+                div.onclick = (e) => {
+                    // バッジ以外の場所をクリックしたら編集
+                    if (!e.target.closest('.recipe-badge-btn')) {
+                        if (typeof openInventoryEdit === 'function') {
+                            openInventoryEdit(item);
+                        }
+                    }
+                };
+            
+                const today = new Date();
+                today.setHours(0,0,0,0);
+                const expDate = new Date(item.expiration_date);
+                expDate.setHours(0,0,0,0);
+                const diffTime = expDate - today;
+                const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)); 
+
+                let dateClass = 'status-normal';
+                let dateText = item.expiration_date.split('T')[0];
+
+                if (diffDays < 0) {
+                    dateClass = 'status-expired';
+                    dateText += ' (期限切れ)';
+                } else if (diffDays <= 2) {
+                    dateClass = 'status-soon';
+                    if (diffDays === 0) dateText += ' (今日)';
+                    else dateText += ` (あと${diffDays}日)`;
+                }
+
+                let badgeHtml = '';
+                if (item.recipe_count > 0) {
+                    badgeHtml = `<button class="recipe-badge-btn" onclick="goToFilteredRecipes(${item.catalog_id}, '${item.name}')">🍳 ${item.recipe_count}</button>`;
+                }
+
+                let thumbHtml = item.image_path ? `<img src="/images/${item.image_path}" class="list-thumbnail">` : '';
+                let amountDisplay = item.amount === -1 ? '<span class="stock-status-ok">在庫あり</span>' : `${item.amount} ${item.unit}`;
+
+                div.innerHTML = `
+                    <div class="card-content-wrapper">
+                        ${thumbHtml}
+                        <div class="card-text-area">
+                            <div class="card-tag-row">
+                                <span class="tag date-tag ${dateClass}">期限: ${dateText}</span>
+                            </div>
+                            <div class="card-name-row">
+                                <span class="item-name">${item.name}</span>
+                                ${badgeHtml}
+                            </div>
+                        </div>
+                    </div>
+                    <div class="item-unit">${amountDisplay}</div>
+                `;
+                listEl.appendChild(div);
+            });
+        }
+    });
+}
+
+document.addEventListener('input', (e) => {
+    if (e.target.id === 'inventory-search') {
+        const term = e.target.value.toLowerCase().trim();
+        if (!term) {
+            renderInventory(inventoryData);
+            return;
+        }
+        const filtered = inventoryData.filter(item => {
+            const nameMatch = item.name.toLowerCase().includes(term);
+            const kanaMatch = item.kana && item.kana.toLowerCase().includes(term);
+            return nameMatch || kanaMatch;
+        });
+        renderInventory(filtered);
+    }
+});
+
+window.goToFilteredRecipes = function(catalogId, itemName) {
+    sessionStorage.setItem('recipe_filter_id', catalogId);
+    sessionStorage.setItem('recipe_filter_name', itemName);
+    const recipeTab = document.querySelector('a[data-view="recipes"]');
+    if(recipeTab) recipeTab.click();
+};
+
 ----- C:\Users\wasab\OneDrive\デスクトップ\kimichan2\static\js\inventory_locations.js -----
 let locations = []; 
 // グローバルから呼べるようにwindowに登録
@@ -1158,6 +1652,7 @@ window.deleteLocation = function(id) {
 let fridgePhotos = [];
 let uploadTargetLocation = 'その他';
 
+// 写真データの取得
 window.fetchFridgePhotos = function() {
     return fetch('/api/fridge_photos')
         .then(res => res.json())
@@ -1167,6 +1662,7 @@ window.fetchFridgePhotos = function() {
         .catch(err => console.error(err));
 };
 
+// 場所ごとの写真エリア生成 (inventory_list.jsから呼ばれる)
 window.renderLocationPhotos = function(locationName) {
     const photos = fridgePhotos.filter(p => {
         const pLoc = p.location || 'その他';
@@ -1183,8 +1679,12 @@ window.renderLocationPhotos = function(locationName) {
     addBtn.onclick = () => {
         uploadTargetLocation = locationName;
         const fileInput = document.getElementById('snapshot-file');
-        fileInput.value = ''; 
-        fileInput.click();
+        if (fileInput) {
+            fileInput.value = ''; 
+            fileInput.click();
+        } else {
+            console.error("snapshot-file element not found");
+        }
     };
     container.appendChild(addBtn);
 
@@ -1214,8 +1714,10 @@ window.renderLocationPhotos = function(locationName) {
 function openPhotoView(path) {
     const modal = document.getElementById('modal-photo-view');
     const img = document.getElementById('photo-view-img');
-    img.src = `/images/${path}`;
-    modal.classList.add('active');
+    if (modal && img) {
+        img.src = `/images/${path}`;
+        modal.classList.add('active');
+    }
 }
 
 window.deleteFridgePhoto = function(id, e) {
@@ -1223,61 +1725,112 @@ window.deleteFridgePhoto = function(id, e) {
     if (!confirm('この写真を削除しますか？')) return;
     fetch(`/api/fridge_photos?id=${id}`, { method: 'DELETE' })
     .then(() => {
-        // 再取得と再描画は inventory.js 側で制御するため、イベント発行またはデータ更新のみ
         return window.fetchFridgePhotos();
     })
     .then(() => {
         if (typeof renderInventory === 'function') {
-             // インベントリ全体を再描画して写真も更新
-             renderInventory(inventoryData);
+             // データを再描画（inventory_list.jsの関数）
+             // 引数がないとエラーになる場合があるので、現在のデータを渡すかリロード
+             // ここでは簡易的に window.fetchInventory を呼ぶ
+             if(window.fetchInventory) window.fetchInventory();
         }
     });
 };
 
+// UIセットアップ (app.js または initInventory から呼ばれる)
 window.setupPhotoUI = function() {
     const snapshotFile = document.getElementById('snapshot-file');
     const btnPhotoClose = document.getElementById('btn-photo-close');
     const photoViewOverlay = document.getElementById('modal-photo-view');
 
     if (snapshotFile) {
-        snapshotFile.addEventListener('change', () => {
-            const file = snapshotFile.files[0];
-            if (!file) return;
-            const formData = new FormData();
-            formData.append('photo', file);
-            fetch('/api/upload', { method: 'POST', body: formData })
-            .then(res => res.json())
-            .then(data => {
-                if (data.status === 'success') {
-                    return fetch('/api/fridge_photos', {
-                        method: 'POST',
-                        headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({ 
-                            image_path: data.filename,
-                            location: uploadTargetLocation
-                        })
-                    });
+        snapshotFile.addEventListener('change', async () => {
+            const files = snapshotFile.files;
+            if (!files || files.length === 0) return;
+
+            // 複数枚対応（最大2枚まで処理）
+            const filesToUpload = Array.from(files).slice(0, 2);
+
+            for (const file of filesToUpload) {
+                try {
+                    // リサイズ (最大800px, 品質0.7)
+                    const resizedBlob = await resizeImage(file, 800, 0.7);
+                    
+                    const formData = new FormData();
+                    formData.append('photo', resizedBlob, file.name);
+
+                    const uploadRes = await fetch('/api/upload', { method: 'POST', body: formData });
+                    const uploadData = await uploadRes.json();
+                    
+                    if (uploadData.status === 'success') {
+                        await fetch('/api/fridge_photos', {
+                            method: 'POST',
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify({ 
+                                image_path: uploadData.filename,
+                                location: uploadTargetLocation
+                            })
+                        });
+                    }
+                } catch(e) {
+                    console.error("アップロード失敗", e);
+                    alert(`写真 ${file.name} の処理に失敗しました。`);
                 }
-            })
-            .then(() => window.fetchFridgePhotos())
-            .then(() => {
-                if (typeof renderInventory === 'function') {
-                     renderInventory(inventoryData);
-                }
-            })
-            .catch(err => alert('アップロード失敗'));
+            }
+
+            // 更新
+            window.fetchFridgePhotos().then(() => {
+                if(window.fetchInventory) window.fetchInventory();
+            });
         });
     }
 
     if(btnPhotoClose) {
         btnPhotoClose.addEventListener('click', () => photoViewOverlay.classList.remove('active'));
-        photoViewOverlay.addEventListener('click', () => photoViewOverlay.classList.remove('active'));
+    }
+    if(photoViewOverlay) {
+        photoViewOverlay.addEventListener('click', (e) => {
+            if(e.target === photoViewOverlay) photoViewOverlay.classList.remove('active');
+        });
     }
     
-    // 各モーダル内の画像アップロード設定 (ここは変更なし)
+    // アイテム編集用などもセットアップ
     setupImageUpload('inv-file', 'inv-preview', 'inv-image-path');
     setupImageUpload('inv-edit-file', 'inv-edit-preview', 'inv-edit-image-path');
 };
+
+// 画像リサイズ関数 (共通で使用)
+function resizeImage(file, maxWidth, quality) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            const img = new Image();
+            img.onload = () => {
+                let width = img.width;
+                let height = img.height;
+
+                if (width > maxWidth) {
+                    height = Math.round(height * (maxWidth / width));
+                    width = maxWidth;
+                }
+
+                const canvas = document.createElement('canvas');
+                canvas.width = width;
+                canvas.height = height;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(img, 0, 0, width, height);
+
+                canvas.toBlob((blob) => {
+                    resolve(blob);
+                }, 'image/jpeg', quality);
+            };
+            img.onerror = reject;
+            img.src = e.target.result;
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+    });
+}
 
 function setupImageUpload(inputId, previewId, pathInputId) {
     const input = document.getElementById(inputId);
@@ -1286,370 +1839,41 @@ function setupImageUpload(inputId, previewId, pathInputId) {
 
     if(!input) return;
 
-    input.addEventListener('change', () => {
+    input.addEventListener('change', async () => {
         const file = input.files[0];
         if (!file) return;
 
-        const formData = new FormData();
-        formData.append('photo', file);
+        try {
+            const resizedBlob = await resizeImage(file, 600, 0.7);
+            const formData = new FormData();
+            formData.append('photo', resizedBlob, file.name);
 
-        const reader = new FileReader();
-        reader.onload = (e) => {
-            preview.src = e.target.result;
-            preview.classList.add('active');
-        };
-        reader.readAsDataURL(file);
+            // プレビュー即時表示
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                if(preview) {
+                    preview.src = e.target.result;
+                    preview.style.display = 'block'; // activeクラスではなくdisplay制御の方が確実
+                }
+            };
+            reader.readAsDataURL(resizedBlob);
 
-        fetch('/api/upload', {
-            method: 'POST',
-            body: formData
-        })
-        .then(res => res.json())
-        .then(data => {
-            if (data.status === 'success') {
-                pathInput.value = data.filename;
-            } else {
-                alert('画像のアップロードに失敗しました');
-            }
-        })
-        .catch(err => {
-            console.error(err);
-            alert('通信エラー');
-        });
-    });
-}
-
------ C:\Users\wasab\OneDrive\デスクトップ\kimichan2\static\js\inventory.js -----
-let inventoryData = [];
-let catalogListForInv = [];
-
-function initInventory() {
-    if (window.fetchLocations) window.fetchLocations();
-    // 写真と在庫の取得
-    if (window.fetchFridgePhotos) window.fetchFridgePhotos();
-
-    // 初回: 在庫取得 -> カタログ取得(フィルタリング)
-    window.fetchInventory().then(fetchCatalogForInv);
-    
-    setupInventoryUI();
-    if (window.setupLocationUI) window.setupLocationUI();
-    if (window.setupPhotoUI) window.setupPhotoUI();
-}
-
-window.fetchInventory = function() {
-    return fetch('/api/ingredients')
-        .then(res => res.json())
-        .then(data => {
-            inventoryData = data;
-            renderInventory(inventoryData);
-        })
-        .catch(err => console.error(err));
-};
-
-function fetchCatalogForInv() {
-    fetch('/api/catalog')
-        .then(res => res.json())
-        .then(data => {
-            const inventoryCatalogIds = new Set(
-                inventoryData.map(item => item.catalog_id)
-            );
-
-            // 調味料を除外し、かつ在庫にないものをフィルタリング
-            let filteredData = data.filter(item => {
-                const isSeasoning = item.classification === '調味料';
-                const isInInventory = inventoryCatalogIds.has(item.id);
-                return !isSeasoning && !isInInventory;
+            fetch('/api/upload', { method: 'POST', body: formData })
+            .then(res => res.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    if(pathInput) pathInput.value = data.filename;
+                } else {
+                    alert('画像のアップロードに失敗しました');
+                }
+            })
+            .catch(err => {
+                console.error(err);
+                alert('通信エラー');
             });
-
-            // ソート
-            filteredData.sort((a, b) => {
-                const compare = (keyA, keyB) => keyA.localeCompare(keyB, 'ja');
-                let result = compare(a.classification || '', b.classification || '');
-                if (result !== 0) return result;
-                result = compare(a.category || '', b.category || '');
-                if (result !== 0) return result;
-                const ka = a.kana || a.name;
-                const kb = b.kana || b.name;
-                return compare(ka, kb);
-            });
-            
-            catalogListForInv = filteredData;
-            updateCatalogSelect();
-        });
-}
-
-function updateCatalogSelect() {
-    const select = document.getElementById('inv-select-catalog');
-    if (!select) return;
-    select.innerHTML = '<option value="">カタログから選択...</option>';
-    catalogListForInv.forEach(item => {
-        const opt = document.createElement('option');
-        const classification = item.classification || '分類なし';
-        const category = item.category || 'カテゴリなし';
-        const kana = item.kana ? ` (${item.kana})` : '';
-
-        opt.value = item.id;
-        opt.textContent = `${classification} / ${category} - ${item.name}${kana}`;
-        opt.dataset.unit = item.default_unit;
-        select.appendChild(opt);
-    });
-}
-
-function renderInventory(items) {
-    const listEl = document.getElementById('inventory-list');
-    if (!listEl) return;
-    listEl.innerHTML = '';
-    let currentLocation = null;
-
-    if (items.length === 0) {
-        listEl.innerHTML = '<div style="text-align:center; padding:20px; color:#999;">該当する食材はありません</div>';
-        return;
-    }
-
-    items.forEach(item => {
-        if (item.location !== currentLocation) {
-            currentLocation = item.location;
-            const header = document.createElement('div');
-            header.className = 'loc-header-badge';
-            header.textContent = currentLocation || 'その他';
-            if (listEl.children.length > 0) header.style.marginTop = '15px';
-         
-            listEl.appendChild(header);
-
-            // 写真エリアの挿入
-            if (window.renderLocationPhotos) {
-                const photoStrip = window.renderLocationPhotos(currentLocation || 'その他');
-                listEl.appendChild(photoStrip);
-            }
+        } catch(e) {
+            console.error(e);
         }
-
-        const div = document.createElement('div');
-        div.className = 'card';
-        div.onclick = (e) => {
-            if (!e.target.classList.contains('recipe-badge')) {
-                openInventoryEdit(item);
-            }
-        };
-      
-        let badgeHtml = '';
-        if (item.recipe_count > 0) {
-            badgeHtml = `
-            <span class="recipe-badge" onclick="goToFilteredRecipes(${item.catalog_id}, '${item.name}')" 
-                  style="background:#e67e22; color:white; padding:4px 10px; border-radius:20px; font-size:11px; font-weight:bold;
-margin-left:10px; cursor:pointer;">
-                🍳 ${item.recipe_count}
-            </span>`;
-        }
-
-        let thumbHtml = '';
-        if (item.image_path) {
-            thumbHtml = `<img src="/images/${item.image_path}" class="list-thumbnail">`;
-        }
-
-        let amountDisplay = '';
-        if (item.amount === -1) {
-            amountDisplay = '<span style="color:#27ae60;font-weight:bold;">在庫あり</span>';
-        } else {
-            amountDisplay = `${item.amount} ${item.unit}`;
-        }
-
-        div.innerHTML = `
-            <div style="display:flex; align-items:center;">
-                ${thumbHtml}
-                <div class="card-content" style="flex:1;">
-                    <div style="display:flex; align-items:center;">
-                        <span class="tag">期限: ${item.expiration_date.split('T')[0]}</span>
-                    </div>
-                    <div style="display:flex; align-items:center; margin-top:4px;">
-                        <span class="item-name">${item.name}</span>
-                        ${badgeHtml}
-                    </div>
-                </div>
-            </div>
-           <div class="item-unit">${amountDisplay}</div>
-        `;
-        listEl.appendChild(div);
-    });
-}
-
-window.goToFilteredRecipes = function(catalogId, itemName) {
-    sessionStorage.setItem('recipe_filter_id', catalogId);
-    sessionStorage.setItem('recipe_filter_name', itemName);
-    const recipeTab = document.querySelector('a[data-view="recipes"]');
-    if(recipeTab) recipeTab.click();
-};
-
-function openInventoryEdit(item) {
-    const overlay = document.getElementById('modal-inv-edit');
-    document.getElementById('inv-edit-title').textContent = item.name + ' の管理';
-    document.getElementById('inv-edit-id').value = item.id;
-    document.getElementById('inv-edit-amount').value = item.amount;
-    document.getElementById('inv-edit-unit').textContent = item.unit;
-    document.getElementById('inv-edit-date').value = item.expiration_date.split('T')[0];
-
-    const locSelect = document.getElementById('inv-edit-location');
-    if(item.location) {
-        locSelect.value = item.location;
-    }
-    overlay.classList.add('active');
-}
-
-window.addAmount = function(val) {
-    const input = document.getElementById('inv-amount');
-    let current = parseFloat(input.value) || 0;
-    let nextVal = current + val;
-    
-    if (nextVal < 0) nextVal = 0;
-    
-    input.value = Math.round(nextVal * 10) / 10;
-};
-
-function setupInventoryUI() {
-    const fab = document.getElementById('fab-add-inventory');
-    const overlay = document.getElementById('modal-inventory');
-    const editOverlay = document.getElementById('modal-inv-edit');
-    const btnCancel = document.getElementById('btn-inv-cancel');
-    const btnSave = document.getElementById('btn-inv-save');
-    const btnEditCancel = document.getElementById('btn-inv-edit-cancel');
-    const btnUpdate = document.getElementById('btn-inv-update');
-    const btnDelete = document.getElementById('btn-inv-delete');
-    const select = document.getElementById('inv-select-catalog');
-    const unitInput = document.getElementById('inv-unit');
-    const searchInput = document.getElementById('inventory-search'); // ★追加
-
-    // ★検索ロジックの追加
-    if (searchInput) {
-        searchInput.addEventListener('input', (e) => {
-            const term = e.target.value.toLowerCase().trim();
-            if (!term) {
-                renderInventory(inventoryData);
-                return;
-            }
-            const filtered = inventoryData.filter(item => 
-                item.name.toLowerCase().includes(term)
-            );
-            renderInventory(filtered);
-        });
-    }
-
-    const detailToggle = document.getElementById('inv-detail-toggle');
-    const detailArea = document.getElementById('inv-detail-area');
-    if (detailToggle) {
-        detailToggle.addEventListener('change', (e) => {
-            if (e.target.checked) {
-                detailArea.style.display = 'block';
-            } else {
-                detailArea.style.display = 'none';
-            }
-        });
-    }
-
-    if (!fab) return;
-
-    fab.addEventListener('click', () => {
-        document.getElementById('inv-detail-toggle').checked = false;
-        document.getElementById('inv-detail-area').style.display = 'none';
-        document.getElementById('inv-amount').value = 1; 
-        overlay.classList.add('active');
-    });
-    btnCancel.addEventListener('click', () => overlay.classList.remove('active'));
-    btnEditCancel.addEventListener('click', (e) => {
-        e.preventDefault();
-        editOverlay.classList.remove('active');
-    });
-    select.addEventListener('change', () => {
-        const selected = select.options[select.selectedIndex];
-        const u = selected.dataset.unit || '';
-        unitInput.value = u;
-    });
-
-    // 保存処理
-    btnSave.addEventListener('click', () => {
-        const catalogId = parseInt(select.value);
-        const location = document.getElementById('inv-location').value;
-
-        let amount = -1;
-        let date = "";
-        
-        if (document.getElementById('inv-detail-toggle').checked) {
-            amount = parseFloat(document.getElementById('inv-amount').value);
-            if (isNaN(amount)) amount = 1; 
-            date = document.getElementById('inv-date').value;
-        }
-
-        let expirationDate = "";
-        if (date) {
-            expirationDate = date + "T00:00:00Z";
-        }
-
-        if (!catalogId) return alert('食材を選んでください');
-
-        const data = {
-            catalog_id: catalogId,
-            amount: amount,
-            unit: unitInput.value,
-            expiration_date: expirationDate,
-            location: location
-        };
-
-        fetch('/api/ingredients', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify(data)
-        })
-        .then(res => {
-            if (!res.ok) throw new Error('Failed');
-            overlay.classList.remove('active');
-            window.fetchInventory().then(() => fetchCatalogForInv());
-        })
-        .catch(err => alert('エラー: ' + err));
-    });
-
-    // 更新処理
-    btnUpdate.addEventListener('click', () => {
-        const id = document.getElementById('inv-edit-id').value;
-        const amount = parseFloat(document.getElementById('inv-edit-amount').value);
-        const date = document.getElementById('inv-edit-date').value;
-        const location = document.getElementById('inv-edit-location').value;
-
-        if (isNaN(amount)) return alert('数量を入力してください');
-
-        let expirationDate = "";
-        if (date) {
-            expirationDate = date.includes('T') ? date : date + "T00:00:00Z";
-        }
-
-        const data = {
-            id: parseInt(id),
-            amount: amount,
-            expiration_date: expirationDate,
-            location: location
-        };
-
-        fetch('/api/ingredients', {
-            method: 'PUT',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify(data)
-        })
-        .then(res => {
-            if (!res.ok) throw new Error('Update failed');
-            editOverlay.classList.remove('active');
-            window.fetchInventory().then(() => fetchCatalogForInv());
-        })
-        .catch(err => alert('更新エラー: ' + err));
-    });
-
-    // 削除処理
-    btnDelete.addEventListener('click', () => {
-        if (!confirm('本当に削除しますか？（使い切ったことになります）')) return;
-        const id = document.getElementById('inv-edit-id').value;
-        fetch(`/api/ingredients?id=${id}`, { method: 'DELETE' })
-        .then(res => {
-            if (!res.ok) throw new Error('Delete failed');
-            editOverlay.classList.remove('active');
-            window.fetchInventory().then(() => fetchCatalogForInv());
-        })
-        .catch(err => alert('削除エラー: ' + err));
     });
 }
 
@@ -1975,6 +2199,7 @@ function renderRecipes(items) {
 
 // --- 詳細画面表示 ---
 
+// --- 詳細画面表示 ---
 function openRecipeDetail(recipe) {
     currentRecipeDetail = recipe;
     
@@ -2000,7 +2225,6 @@ function openRecipeDetail(recipe) {
     ingArea.innerHTML = '<div style="text-align:center; color:#999;">読み込み中...</div>';
     if (missingAlert) missingAlert.style.display = 'none';
 
-    // 材料APIを叩いて詳細情報を取得
     fetch(`/api/recipes/ingredients?id=${recipe.id}`)
         .then(res => res.json())
         .then(ingredients => {
@@ -2016,15 +2240,17 @@ function openRecipeDetail(recipe) {
             let currentGroup = "";
 
             ingredients.forEach(ing => {
-                // 在庫チェック
                 const statusIcon = ing.in_stock ? '✅' : '❌';
                 const statusClass = ing.in_stock ? 'ing-status-ok' : 'ing-status-missing';
                 
+                // ★追加: 在庫がない場合に「＋」ボタンを表示
+                let addBtnHtml = '';
                 if (!ing.in_stock) {
                     missingItems.push(ing.name);
+                    // catalog_id と 名前 を渡す
+                    addBtnHtml = `<button class="btn-quick-add" onclick="quickAddToInventory(${ing.catalog_id}, '${ing.name}')">＋在庫へ</button>`;
                 }
 
-                // グループ見出しの挿入 (＝ソース＝ など)
                 if (ing.group_name && ing.group_name !== currentGroup) {
                     currentGroup = ing.group_name;
                     html += `<li class="recipe-group-header">${currentGroup}</li>`;
@@ -2034,16 +2260,17 @@ function openRecipeDetail(recipe) {
 
                 html += `
                 <li style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px dashed #eee; padding:8px 0;">
-                    <span class="${statusClass}">
-                        ${statusIcon} ${ing.name}
-                    </span>
+                    <div style="display:flex; align-items:center;">
+                        <span class="${statusClass}">
+                            ${statusIcon} ${ing.name}
+                        </span>
+                        ${addBtnHtml} </div>
                     <span style="font-weight:bold; font-size:13px;">${ing.amount}${ing.unit}</span>
                 </li>`;
             });
             html += '</ul>';
             ingArea.innerHTML = html;
 
-            // 足りないものリストを表示
             if (missingItems.length > 0 && missingAlert) {
                 missingAlert.style.display = 'block';
                 missingAlert.innerHTML = `
@@ -2059,6 +2286,52 @@ function openRecipeDetail(recipe) {
         
     modal.classList.add('active');
 }
+
+// ★修正: クイック追加機能 (400エラー対策)
+window.quickAddToInventory = function(catalogId, name) {
+    if (!confirm(`「${name}」を在庫(その他)に追加しますか？`)) return;
+
+    // 数値型に変換（これが重要）
+    const catId = parseInt(catalogId, 10);
+
+    if (isNaN(catId) || catId <= 0) {
+        alert("エラー: 食材IDが不正です");
+        return;
+    }
+
+    const data = {
+        catalog_id: catId,
+        amount: -1, // 在庫ありマーク
+        unit: "",
+        expiration_date: "", // 空文字でOK
+        location: "その他"
+    };
+
+    fetch('/api/ingredients', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(data)
+    })
+    .then(async res => {
+        if (!res.ok) {
+            // エラー内容をテキストで取得して表示
+            const errorText = await res.text();
+            throw new Error(errorText || res.statusText);
+        }
+        alert(`「${name}」を追加しました！`);
+        
+        // 詳細モーダルを閉じる
+        const modal = document.getElementById('modal-recipe-detail');
+        if(modal) modal.classList.remove('active');
+        
+        // 在庫リスト画面なら更新
+        if (typeof fetchInventory === 'function') fetchInventory();
+    })
+    .catch(err => {
+        console.error("Quick Add Error:", err);
+        alert('追加できませんでした: ' + err.message);
+    });
+};
 
 ----- C:\Users\wasab\OneDrive\デスクトップ\kimichan2\static\js\seasoning_fetch.js -----
 // グローバル変数として window に公開

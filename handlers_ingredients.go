@@ -1,6 +1,7 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -23,27 +24,24 @@ func handleIngredients(w http.ResponseWriter, r *http.Request) {
 }
 
 func getIngredients(w http.ResponseWriter, r *http.Request) {
-	// ★追加: 全件取得フラグ
 	isAll := r.URL.Query().Get("all") == "true"
 
+	// ★修正: c.kana も取得する
 	query := `
 		SELECT 
 			i.id, i.catalog_id, i.amount, i.unit, i.expiration_date, i.location, i.created_at, i.updated_at,
-			c.name,
+			c.name, c.kana,
 			(SELECT COUNT(*) FROM recipe_ingredients ri WHERE ri.catalog_id = c.id) as recipe_count
 		FROM refrigerator_ingredients i
 		JOIN item_catalog c ON i.catalog_id = c.id
 		ORDER BY i.location ASC, c.name ASC
 	`
 
-	// ★変更: クラウド上のみ制限。PCでは全件。
-	isCloud := os.Getenv("K_SERVICE") != ""
-	if isCloud && !isAll {
+	if isCloud := os.Getenv("K_SERVICE") != ""; isCloud && !isAll {
 		query += " LIMIT 100"
 	}
 
 	rows, err := db.Query(query)
-	// ... (以下、変更なし) ...
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -53,19 +51,20 @@ func getIngredients(w http.ResponseWriter, r *http.Request) {
 	ingredients := []Ingredient{}
 	for rows.Next() {
 		var item Ingredient
+		var kana sql.NullString // カナは空の可能性があるのでNullStringで受ける
 		if err := rows.Scan(
 			&item.ID, &item.CatalogID, &item.Amount, &item.Unit, &item.ExpirationDate, &item.Location, &item.CreatedAt, &item.UpdatedAt,
-			&item.Name, &item.RecipeCount,
+			&item.Name, &kana, &item.RecipeCount,
 		); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+		item.Kana = kana.String // 文字列に変換してセット
 		ingredients = append(ingredients, item)
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(ingredients)
 }
-
 func addIngredient(w http.ResponseWriter, r *http.Request) {
 	var item Ingredient
 	if err := json.NewDecoder(r.Body).Decode(&item); err != nil {

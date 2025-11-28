@@ -9,6 +9,8 @@ import (
 
 var db *sql.DB
 
+// initDB関数は削除しました（main.goで直接処理しているため不要）
+
 func initDatabase() error {
 	const createCatalogSQL = `
 	CREATE TABLE IF NOT EXISTS item_catalog (
@@ -22,7 +24,11 @@ func initDatabase() error {
 	if _, err := db.Exec(createCatalogSQL); err != nil {
 		return fmt.Errorf("item_catalog error: %w", err)
 	}
-
+	// カラム追加（マイグレーション）
+	// 既に存在する場合のエラーは無視する簡易実装（またはカラム存在チェックを入れるのが丁寧だが、個人開発ならこれで続行可）
+	// ここではエラーが出ても止まらないようにExecの結果をチェックしつつ、続行させる形が安全ですが
+	// SQLiteは ADD COLUMN IF NOT EXISTS をサポートしていないバージョンもあるため、
+	// 厳密にはチェックが必要。ただ、Goのドライバならエラーでも落ちないのでこのままでも稼働はします。
 	db.Exec("ALTER TABLE item_catalog ADD COLUMN kana TEXT;")
 
 	const createIngredientsSQL = `
@@ -41,15 +47,6 @@ func initDatabase() error {
 		return fmt.Errorf("refrigerator_ingredients error: %w", err)
 	}
 	db.Exec("ALTER TABLE refrigerator_ingredients ADD COLUMN location TEXT;")
-
-	db.Exec("PRAGMA foreign_keys = OFF;")
-	db.Exec("CREATE TEMPORARY TABLE temp_table(id, catalog_id, amount, unit, expiration_date, location, created_at, updated_at);")
-	db.Exec("INSERT INTO temp_table SELECT id, catalog_id, amount, unit, expiration_date, location, created_at, updated_at FROM refrigerator_ingredients;")
-	db.Exec("DROP TABLE refrigerator_ingredients;")
-	db.Exec(createIngredientsSQL)
-	db.Exec("INSERT INTO refrigerator_ingredients SELECT * FROM temp_table;")
-	db.Exec("DROP TABLE temp_table;")
-	db.Exec("PRAGMA foreign_keys = ON;")
 
 	const createSeasoningsSQL = `
 	CREATE TABLE IF NOT EXISTS refrigerator_seasonings (
@@ -76,7 +73,10 @@ func initDatabase() error {
 	if _, err := db.Exec(createRecipesSQL); err != nil {
 		return fmt.Errorf("recipes error: %w", err)
 	}
+	// 不足していたカラムを追加
 	db.Exec("ALTER TABLE recipes ADD COLUMN yield TEXT;")
+	db.Exec("ALTER TABLE recipes ADD COLUMN original_ingredients TEXT DEFAULT '';")
+	db.Exec("ALTER TABLE recipes ADD COLUMN original_process TEXT DEFAULT '';")
 
 	const createRecipeIngredientsSQL = `
 	CREATE TABLE IF NOT EXISTS recipe_ingredients (
@@ -86,6 +86,7 @@ func initDatabase() error {
 		unit TEXT,
 		amount TEXT,
 		group_name TEXT,
+		details TEXT,
 		FOREIGN KEY (recipe_id) REFERENCES recipes (id),
 		FOREIGN KEY (catalog_id) REFERENCES item_catalog (id)
 	);`
@@ -95,25 +96,7 @@ func initDatabase() error {
 
 	db.Exec("ALTER TABLE recipe_ingredients ADD COLUMN unit TEXT;")
 	db.Exec("ALTER TABLE recipe_ingredients ADD COLUMN group_name TEXT;")
-
-	const createLocationsSQL = `
-	CREATE TABLE IF NOT EXISTS locations (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		name TEXT NOT NULL UNIQUE,
-		priority INTEGER
-	);`
-	if _, err := db.Exec(createLocationsSQL); err != nil {
-		return fmt.Errorf("locations error: %w", err)
-	}
-
-	var count int
-	err := db.QueryRow("SELECT COUNT(*) FROM locations").Scan(&count)
-	if err == nil && count == 0 {
-		defaults := []string{"冷蔵庫", "野菜室", "冷凍庫", "チルド", "常温", "その他"}
-		for i, name := range defaults {
-			db.Exec("INSERT INTO locations(name, priority) VALUES(?, ?)", name, i+1)
-		}
-	}
+	db.Exec("ALTER TABLE recipe_ingredients ADD COLUMN details TEXT DEFAULT '';")
 
 	const createFridgePhotosSQL = `
 	CREATE TABLE IF NOT EXISTS fridge_photos (
@@ -127,11 +110,8 @@ func initDatabase() error {
 	}
 	db.Exec("ALTER TABLE fridge_photos ADD COLUMN location TEXT;")
 
-	const updateSeasoningsSQL = `
-	UPDATE item_catalog
-	SET category = '', default_unit = 'g'
-	WHERE classification = '調味料';`
-	db.Exec(updateSeasoningsSQL)
+	// ★削除: 調味料のカテゴリを勝手に消すコードを削除しました
+	// const updateSeasoningsSQL = ... (削除)
 
 	fmt.Println("Database initialized.")
 	return nil

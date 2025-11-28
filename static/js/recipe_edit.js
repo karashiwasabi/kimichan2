@@ -1,35 +1,50 @@
-// --- 編集画面 ---
-
+// --- 編集画面を開く ---
 function openRecipeEditModal() {
     // 詳細画面を閉じる
-    document.getElementById('modal-recipe-detail').classList.remove('active');
+    const detailModal = document.getElementById('modal-recipe-detail');
+    if(detailModal) detailModal.classList.remove('active');
     
     // タイトル変更
     document.getElementById('modal-recipe-title').textContent = 'レシピ編集';
     
     // 既存データをフォームにセット
+    // currentRecipeDetail は recipe_list.js で定義されたグローバル変数を使用
+    if (typeof currentRecipeDetail === 'undefined' || !currentRecipeDetail) return;
+
     document.getElementById('rec-id').value = currentRecipeDetail.id;
     document.getElementById('rec-name').value = currentRecipeDetail.name;
     document.getElementById('rec-yield').value = currentRecipeDetail.yield || '';
     document.getElementById('rec-url').value = currentRecipeDetail.url;
+    
+    // 原文データのセット
     document.getElementById('rec-process').value = currentRecipeDetail.process;
+    document.getElementById('rec-original-process').value = currentRecipeDetail.original_process || '';
 
-    // 材料リストをCSVテキストに変換してセット
-    let csvText = "";
-    if (currentIngredients && currentIngredients.length > 0) {
-        csvText = currentIngredients.map(ing => {
-            // 形式: 名前,分量,単位
-            return `${ing.name},${ing.amount},${ing.unit}`;
-        }).join('\n');
+    // 材料CSVの生成 (グループ見出し対応)
+    let csvLines = [];
+    let lastGroup = null;
+
+    // currentIngredients は recipe_list.js で定義されたグローバル変数を使用
+    if (typeof currentIngredients !== 'undefined' && currentIngredients && currentIngredients.length > 0) {
+        currentIngredients.forEach(ing => {
+            if (ing.group_name && ing.group_name !== lastGroup) {
+                csvLines.push(`=${ing.group_name}=`);
+                lastGroup = ing.group_name;
+            } else if (!ing.group_name && lastGroup !== null) {
+                lastGroup = null;
+            }
+            csvLines.push(`${ing.name},${ing.amount},${ing.unit}`);
+        });
     }
-    document.getElementById('rec-csv').value = csvText;
+    document.getElementById('rec-csv').value = csvLines.join('\n');
+    
+    // 原文材料のセット
+    document.getElementById('rec-original-ingredients').value = currentRecipeDetail.original_ingredients || '';
 
-    // 登録モーダルを開く
     document.getElementById('modal-recipe').classList.add('active');
 }
 
 // --- UIイベント設定 ---
-
 function setupRecipeUI() {
     const fab = document.getElementById('fab-add-recipe');
     const overlay = document.getElementById('modal-recipe');
@@ -53,35 +68,38 @@ function setupRecipeUI() {
         document.getElementById('rec-name').value = '';
         document.getElementById('rec-yield').value = '';
         document.getElementById('rec-url').value = '';
+        
         document.getElementById('rec-process').value = '';
+        document.getElementById('rec-original-process').value = '';
+        
         document.getElementById('rec-csv').value = '';
+        document.getElementById('rec-original-ingredients').value = '';
+        
         overlay.classList.add('active');
     });
-    
-    // キャンセル・閉じる
-    btnCancel.addEventListener('click', () => overlay.classList.remove('active'));
-    btnDetailClose.addEventListener('click', () => detailOverlay.classList.remove('active'));
-    
-    // 編集ボタン
-    btnDetailEdit.addEventListener('click', () => openRecipeEditModal());
 
-    // 保存実行
-    btnSave.addEventListener('click', () => saveRecipe());
+    if(btnCancel) btnCancel.addEventListener('click', () => overlay.classList.remove('active'));
+    if(btnDetailClose) btnDetailClose.addEventListener('click', () => detailOverlay.classList.remove('active'));
+    if(btnDetailEdit) btnDetailEdit.addEventListener('click', () => openRecipeEditModal());
 
-    // 不足食材モーダル
-    btnMissingCancel.addEventListener('click', () => missingOverlay.classList.remove('active'));
-    btnMissingRegister.addEventListener('click', () => registerMissingItemsAndRetry());
+    if(btnSave) btnSave.addEventListener('click', () => saveRecipe());
+
+    if(btnMissingCancel) btnMissingCancel.addEventListener('click', () => missingOverlay.classList.remove('active'));
+    if(btnMissingRegister) btnMissingRegister.addEventListener('click', () => registerMissingItemsAndRetry());
 }
 
 // --- 保存処理 ---
-
 function saveRecipe() {
     const id = document.getElementById('rec-id').value;
     const name = document.getElementById('rec-name').value;
     const yieldVal = document.getElementById('rec-yield').value;
     const url = document.getElementById('rec-url').value;
+    
     const process = document.getElementById('rec-process').value;
+    const origProcess = document.getElementById('rec-original-process').value;
+    
     const csvData = document.getElementById('rec-csv').value;
+    const origIng = document.getElementById('rec-original-ingredients').value;
 
     if (!name) return alert('レシピ名は必須です');
     if (!csvData) return alert('材料CSVを入力してください');
@@ -91,7 +109,9 @@ function saveRecipe() {
         yield: yieldVal,
         url: url,
         process: process,
-        csv_data: csvData
+        original_process: origProcess,
+        csv_data: csvData,
+        original_ingredients: origIng
     };
 
     let method = 'POST';
@@ -121,7 +141,7 @@ function saveRecipe() {
     .then(() => {
         alert(id ? 'レシピを更新しました！' : 'レシピを登録しました！');
         document.getElementById('modal-recipe').classList.remove('active');
-        fetchRecipes();
+        if (typeof fetchRecipes === 'function') fetchRecipes();
     })
     .catch(err => {
         if (err.message !== 'missing_ingredients') {
@@ -131,19 +151,16 @@ function saveRecipe() {
 }
 
 // --- 不足食材のクイック登録 ---
-
 function showMissingIngredientsModal(items) {
     const overlay = document.getElementById('modal-missing-ing');
     const listArea = document.getElementById('missing-list-area');
     listArea.innerHTML = '';
-
     items.forEach((name, index) => {
         const div = document.createElement('div');
         div.className = 'form-group';
         div.style.background = '#f9f9f9';
         div.style.padding = '10px';
         div.style.borderRadius = '8px';
-        
         div.innerHTML = `
             <div style="font-weight:bold; margin-bottom:5px;">${name}</div>
             <div style="display:flex; gap:10px;">
@@ -156,19 +173,16 @@ function showMissingIngredientsModal(items) {
         `;
         listArea.appendChild(div);
     });
-
     overlay.classList.add('active');
 }
 
 function registerMissingItemsAndRetry() {
     const listArea = document.getElementById('missing-list-area');
     const itemsToRegister = [];
-    
     const divs = listArea.querySelectorAll('.form-group');
     divs.forEach((div, index) => {
         const name = document.getElementById(`missing-name-${index}`).value;
         const cls = document.getElementById(`missing-class-${index}`).value;
-        
         itemsToRegister.push({
             name: name,
             classification: cls,
@@ -177,7 +191,6 @@ function registerMissingItemsAndRetry() {
         });
     });
 
-    // カタログへの一括登録
     fetch('/api/catalog', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
@@ -188,7 +201,6 @@ function registerMissingItemsAndRetry() {
         return res.json();
     })
     .then(() => {
-        // 成功したらモーダルを閉じて、レシピ保存を再試行
         document.getElementById('modal-missing-ing').classList.remove('active');
         saveRecipe(); 
     })

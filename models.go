@@ -24,6 +24,7 @@ type Ingredient struct {
 	CreatedAt      string  `json:"created_at"`
 	UpdatedAt      string  `json:"updated_at"`
 	Name           string  `json:"name,omitempty"`
+	Kana           string  `json:"kana,omitempty"`
 	RecipeCount    int     `json:"recipe_count"`
 }
 
@@ -39,14 +40,16 @@ type Seasoning struct {
 }
 
 type Recipe struct {
-	ID          int                `json:"id"`
-	Name        string             `json:"name"`
-	Yield       string             `json:"yield"`
-	Process     string             `json:"process"`
-	URL         string             `json:"url"`
-	SourceType  string             `json:"source_type"`
-	CreatedAt   string             `json:"created_at"`
-	Ingredients []RecipeIngredient `json:"ingredients,omitempty"`
+	ID                  int                `json:"id"`
+	Name                string             `json:"name"`
+	Yield               string             `json:"yield"`
+	Process             string             `json:"process"`
+	OriginalProcess     string             `json:"original_process"` // ★追加
+	URL                 string             `json:"url"`
+	SourceType          string             `json:"source_type"`
+	CreatedAt           string             `json:"created_at"`
+	Ingredients         []RecipeIngredient `json:"ingredients,omitempty"`
+	OriginalIngredients string             `json:"original_ingredients"` // ★追加
 }
 
 type RecipeIngredient struct {
@@ -61,7 +64,7 @@ type RecipeIngredient struct {
 type FridgePhoto struct {
 	ID        int    `json:"id"`
 	ImagePath string `json:"image_path"`
-	Location  string `json:"location"` // 追加
+	Location  string `json:"location"`
 	CreatedAt string `json:"created_at"`
 }
 

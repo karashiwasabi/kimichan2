@@ -26,7 +26,6 @@ type LinkAnalysisResult struct {
 	NextPageURL string   `json:"next_page_url"`
 }
 
-// ★修正: 原文フィールドを追加
 type GeneratedRecipe struct {
 	Name        string `json:"name"`
 	Yield       string `json:"yield"`
@@ -35,8 +34,8 @@ type GeneratedRecipe struct {
 		Amount string `json:"amount"`
 	} `json:"ingredients"`
 	Process        any    `json:"process"`
-	RawIngredients string `json:"raw_ingredients"` // ★材料の原文
-	RawProcess     string `json:"raw_process"`     // ★作り方の原文
+	RawIngredients string `json:"raw_ingredients"`
+	RawProcess     string `json:"raw_process"`
 }
 
 var apiKey string
@@ -54,7 +53,7 @@ func main() {
 	}
 	defer db.Close()
 
-	fmt.Println("🤖 レシピ収集ロボット (原文保存版)、起動...")
+	fmt.Println("🤖 レシピ収集ロボット (警告修正版)、起動...")
 
 	currentURL := TARGET_URL
 	totalCollected := 0
@@ -93,8 +92,12 @@ func main() {
 			if err == nil {
 				recipe, err := analyzeByGemini(detailHTML)
 				if err == nil {
-					saveRecipe(db, recipe, link)
-					totalCollected++
+					// 保存
+					if err := saveRecipe(db, recipe, link); err != nil {
+						fmt.Printf("    ❌ 保存エラー: %v\n", err)
+					} else {
+						totalCollected++
+					}
 				} else {
 					fmt.Printf("    ❌ AI解析失敗: %v\n", err)
 				}
@@ -117,7 +120,7 @@ func fetchHTML(url string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) ...")
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", err
@@ -146,7 +149,10 @@ Text: %s`, baseURL, text)
 		return nil, err
 	}
 	var res LinkAnalysisResult
-	json.Unmarshal([]byte(resStr), &res)
+	// ★修正: "JSON" -> "json"
+	if err := json.Unmarshal([]byte(resStr), &res); err != nil {
+		return nil, fmt.Errorf("json解析失敗: %v", err)
+	}
 	return &res, nil
 }
 
@@ -154,7 +160,6 @@ func analyzeByGemini(text string) (*GeneratedRecipe, error) {
 	if len(text) > 40000 {
 		text = text[:40000]
 	}
-	// ★修正: 原文(raw_*)も出力するように指示
 	prompt := `レシピ情報をJSON抽出。JSONのみ出力。
 keys: 
 - name
@@ -171,22 +176,27 @@ Text: ` + text
 		return nil, err
 	}
 	var r GeneratedRecipe
+	// ★修正: "JSON" -> "json"
 	if err := json.Unmarshal([]byte(resStr), &r); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("json解析失敗: %v", err)
 	}
 	return &r, nil
 }
 
-func saveRecipe(db *sql.DB, r *GeneratedRecipe, sourceURL string) {
+func saveRecipe(db *sql.DB, r *GeneratedRecipe, sourceURL string) error {
 	if r == nil || r.Name == "" {
-		return
+		return fmt.Errorf("レシピデータが空です")
 	}
 
 	var exists int
-	db.QueryRow("SELECT count(*) FROM recipes WHERE name = ?", r.Name).Scan(&exists)
+	// ★修正: "DB" -> "db"
+	err := db.QueryRow("SELECT count(*) FROM recipes WHERE name = ?", r.Name).Scan(&exists)
+	if err != nil {
+		return fmt.Errorf("db検索エラー: %v", err)
+	}
 	if exists > 0 {
 		fmt.Printf("    ⚠️ 登録済み: %s\n", r.Name)
-		return
+		return nil
 	}
 
 	var processText string
@@ -207,29 +217,26 @@ func saveRecipe(db *sql.DB, r *GeneratedRecipe, sourceURL string) {
 		}
 	}
 
-	// もしAIが原文を空で返してきたら、整形済みテキストで代用する
 	if r.RawProcess == "" {
 		r.RawProcess = processText
 	}
-	// 材料原文が空なら、とりあえずJSON文字列表現を入れておく(無いよりマシ)
 	if r.RawIngredients == "" {
 		b, _ := json.Marshal(r.Ingredients)
 		r.RawIngredients = string(b)
 	}
 
 	tx, err := db.Begin()
+	// ★修正: "TX" -> "tx"
 	if err != nil {
-		log.Println(err)
-		return
+		return fmt.Errorf("tx開始エラー: %v", err)
 	}
 
-	// ★修正: original_ingredients, original_process も保存
 	res, err := tx.Exec("INSERT INTO recipes(name, yield, process, original_ingredients, original_process, url) VALUES(?, ?, ?, ?, ?, ?)",
 		r.Name, r.Yield, processText, r.RawIngredients, r.RawProcess, sourceURL)
 	if err != nil {
 		tx.Rollback()
-		log.Println("保存エラー:", err)
-		return
+		// ★修正: "レシピ"は日本語なのでOKだが、統一感のため小文字始まりの英語にするか、そのまま
+		return fmt.Errorf("レシピ保存エラー: %v", err)
 	}
 	recipeID, _ := res.LastInsertId()
 
@@ -237,12 +244,13 @@ func saveRecipe(db *sql.DB, r *GeneratedRecipe, sourceURL string) {
 		if ing.Name == "" {
 			continue
 		}
-		if utf8.RuneCountInString(ing.Name) > 15 || strings.Contains(ing.Name, "味変") {
+		if utf8.RuneCountInString(ing.Name) > 15 || strings.Contains(ing.Name, "味変") || strings.Contains(ing.Name, "お好み") {
 			continue
 		}
 
 		var catalogID int
 		db.QueryRow("SELECT id FROM item_catalog WHERE name = ?", ing.Name).Scan(&catalogID)
+
 		if catalogID == 0 {
 			res, err := tx.Exec("INSERT INTO item_catalog(name, classification, category, default_unit) VALUES(?, ?, ?, ?)",
 				ing.Name, "食材", "未分類", "")
@@ -252,9 +260,14 @@ func saveRecipe(db *sql.DB, r *GeneratedRecipe, sourceURL string) {
 			newID, _ := res.LastInsertId()
 			catalogID = int(newID)
 		}
+
 		tx.Exec("INSERT INTO recipe_ingredients(recipe_id, catalog_id, unit, amount, group_name) VALUES(?, ?, ?, ?, ?)",
 			recipeID, catalogID, "", ing.Amount, "")
 	}
-	tx.Commit()
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("コミットエラー: %v", err)
+	}
 	fmt.Printf("    ✅ 保存完了: %s\n", r.Name)
+	return nil
 }

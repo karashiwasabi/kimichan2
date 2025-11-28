@@ -11,11 +11,13 @@ import (
 )
 
 type RecipeRequest struct {
-	Name    string `json:"name"`
-	Yield   string `json:"yield"`
-	Process string `json:"process"`
-	URL     string `json:"url"`
-	CsvData string `json:"csv_data"`
+	Name                string `json:"name"`
+	Yield               string `json:"yield"`
+	Process             string `json:"process"`
+	OriginalProcess     string `json:"original_process"`
+	URL                 string `json:"url"`
+	CsvData             string `json:"csv_data"`
+	OriginalIngredients string `json:"original_ingredients"`
 }
 
 type RecipeResponse struct {
@@ -53,25 +55,20 @@ func sendMissingIngredientsError(w http.ResponseWriter, items []string) {
 }
 
 func getRecipes(w http.ResponseWriter, r *http.Request) {
-	// 検索フィルタ
 	filterIngredientID := r.URL.Query().Get("ingredient_id")
-	// ★追加: 全件取得フラグ
 	isAll := r.URL.Query().Get("all") == "true"
 
 	var query string
 	var args []interface{}
 
-	// 基本のクエリ (ORDER BYまで)
 	if filterIngredientID != "" {
-		query = `SELECT r.id, r.name, r.yield, r.process, r.url, r.created_at FROM recipes r JOIN recipe_ingredients ri ON r.id = ri.recipe_id WHERE ri.catalog_id = ? ORDER BY r.created_at DESC`
+		query = `SELECT r.id, r.name, r.yield, r.process, r.original_process, r.url, r.created_at, r.original_ingredients FROM recipes r JOIN recipe_ingredients ri ON r.id = ri.recipe_id WHERE ri.catalog_id = ? ORDER BY r.created_at DESC`
 		args = append(args, filterIngredientID)
 	} else {
-		query = `SELECT id, name, yield, process, url, created_at FROM recipes ORDER BY created_at DESC`
+		query = `SELECT id, name, yield, process, original_process, url, created_at, original_ingredients FROM recipes ORDER BY created_at DESC`
 	}
 
-	// ★変更: クラウド(Cloud Run)上で、かつ合言葉がない時だけ制限をかける
-	// ローカル(PC)なら制限なしで全件表示
-	isCloud := os.Getenv("K_SERVICE") != "" // Cloud Runにはこの変数が自動である
+	isCloud := os.Getenv("K_SERVICE") != ""
 	if isCloud && !isAll {
 		query += " LIMIT 50"
 	}
@@ -83,15 +80,17 @@ func getRecipes(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 
-	// --- (以下、変更なし) ---
 	recipes := []RecipeResponse{}
 	for rows.Next() {
 		var r RecipeResponse
-		var yield sql.NullString
-		if err := rows.Scan(&r.ID, &r.Name, &yield, &r.Process, &r.URL, &r.CreatedAt); err != nil {
+		var yield, origProc, origIng sql.NullString
+
+		if err := rows.Scan(&r.ID, &r.Name, &yield, &r.Process, &origProc, &r.URL, &r.CreatedAt, &origIng); err != nil {
 			continue
 		}
 		r.Yield = yield.String
+		r.OriginalProcess = origProc.String
+		r.OriginalIngredients = origIng.String
 		recipes = append(recipes, r)
 	}
 
@@ -101,7 +100,6 @@ func getRecipes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// --- 材料の一括取得 (高速化ロジック) ---
 	recipeIDs := make([]interface{}, len(recipes))
 	placeholders := make([]string, len(recipes))
 	for i, r := range recipes {
@@ -137,7 +135,10 @@ func getRecipes(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// 在庫・調味料マップの作成
+	// --- ★修正: 在庫チェックのロジックを変更 ---
+
+	// 1. 冷蔵庫(refrigerator_ingredients)にある全てのcatalog_idを取得
+	//    (調味料もここに保存されるようになったため、ここだけ見ればOK)
 	invMap := make(map[int]bool)
 	rowsInv, _ := db.Query("SELECT catalog_id FROM refrigerator_ingredients")
 	if rowsInv != nil {
@@ -149,30 +150,26 @@ func getRecipes(w http.ResponseWriter, r *http.Request) {
 		rowsInv.Close()
 	}
 
-	seasMap := make(map[int]bool)
-	rowsSeas, _ := db.Query("SELECT catalog_id FROM refrigerator_seasonings WHERE status != 'なし'")
-	if rowsSeas != nil {
-		for rowsSeas.Next() {
-			var cid int
-			rowsSeas.Scan(&cid)
-			seasMap[cid] = true
-		}
-		rowsSeas.Close()
-	}
+	// ※旧調味料テーブル(refrigerator_seasonings)への参照は削除しました
 
-	// 判定
+	// 2. 判定ロジック
 	for i := range recipes {
 		hasIng := true
 		hasSeas := true
 		ingredients := recipeIngMap[recipes[i].ID]
 
 		for _, ing := range ingredients {
+			// 在庫があるかチェック (invMapだけを見る)
+			inStock := invMap[ing.CatalogID]
+
 			if ing.Classification == "調味料" {
-				if !seasMap[ing.CatalogID] {
+				// 分類が調味料の場合、在庫がなければ hasSeas を false に
+				if !inStock {
 					hasSeas = false
 				}
 			} else {
-				if !invMap[ing.CatalogID] {
+				// それ以外(食材)の場合、在庫がなければ hasIng を false に
+				if !inStock {
 					hasIng = false
 				}
 			}
@@ -199,6 +196,7 @@ func updateRecipe(w http.ResponseWriter, r *http.Request) {
 	fmt.Sscanf(idStr, "%d", &id)
 	saveRecipeCommon(w, r, id)
 }
+
 func saveRecipeCommon(w http.ResponseWriter, r *http.Request, id int) {
 	var req RecipeRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -225,9 +223,7 @@ func saveRecipeCommon(w http.ResponseWriter, r *http.Request, id int) {
 		return
 	}
 
-	// ★修正箇所: スラッシュを改行コードに置換し、解析を容易にする
 	csvDataProcessed := strings.ReplaceAll(req.CsvData, "/", "\n")
-
 	scanner := bufio.NewScanner(strings.NewReader(csvDataProcessed))
 	var currentGroup string
 
@@ -295,7 +291,8 @@ func saveRecipeCommon(w http.ResponseWriter, r *http.Request, id int) {
 	}
 
 	if id == 0 {
-		res, err := tx.Exec("INSERT INTO recipes(name, yield, process, url) VALUES(?, ?, ?, ?)", req.Name, req.Yield, req.Process, req.URL)
+		res, err := tx.Exec("INSERT INTO recipes(name, yield, process, url, original_ingredients, original_process) VALUES(?, ?, ?, ?, ?, ?)",
+			req.Name, req.Yield, req.Process, req.URL, req.OriginalIngredients, req.OriginalProcess)
 		if err != nil {
 			tx.Rollback()
 			sendJSONError(w, err.Error(), http.StatusInternalServerError)
@@ -304,7 +301,8 @@ func saveRecipeCommon(w http.ResponseWriter, r *http.Request, id int) {
 		newID, _ := res.LastInsertId()
 		id = int(newID)
 	} else {
-		_, err := tx.Exec("UPDATE recipes SET name=?, yield=?, process=?, url=? WHERE id=?", req.Name, req.Yield, req.Process, req.URL, id)
+		_, err := tx.Exec("UPDATE recipes SET name=?, yield=?, process=?, url=?, original_ingredients=?, original_process=? WHERE id=?",
+			req.Name, req.Yield, req.Process, req.URL, req.OriginalIngredients, req.OriginalProcess, id)
 		if err != nil {
 			tx.Rollback()
 			sendJSONError(w, err.Error(), http.StatusInternalServerError)
@@ -356,21 +354,20 @@ func handleRecipeIngredients(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// ★修正: 在庫数カウントも refrigerator_ingredients だけを見るように統一
+	// (ORDER BY ri.id ASC で登録順を維持)
 	query := `
 		SELECT 
 			c.name, 
 			ri.amount, 
 			ri.unit,
 			ri.group_name,
-			CASE 
-				WHEN c.classification = '調味料' THEN 
-					(SELECT COUNT(*) FROM refrigerator_seasonings WHERE catalog_id = c.id AND status != 'なし')
-				ELSE 
-					(SELECT COUNT(*) FROM refrigerator_ingredients WHERE catalog_id = c.id)
-			END as stock_count
+			ri.catalog_id, 
+			(SELECT COUNT(*) FROM refrigerator_ingredients WHERE catalog_id = c.id) as stock_count
 		FROM recipe_ingredients ri
 		JOIN item_catalog c ON ri.catalog_id = c.id
 		WHERE ri.recipe_id = ?
+		ORDER BY ri.id ASC
 	`
 
 	rows, err := db.Query(query, recipeID)
@@ -385,6 +382,7 @@ func handleRecipeIngredients(w http.ResponseWriter, r *http.Request) {
 		Amount    string `json:"amount"`
 		Unit      string `json:"unit"`
 		GroupName string `json:"group_name"`
+		CatalogID int    `json:"catalog_id"`
 		InStock   bool   `json:"in_stock"`
 	}
 
@@ -393,7 +391,7 @@ func handleRecipeIngredients(w http.ResponseWriter, r *http.Request) {
 		var i ResIngredient
 		var stockCount int
 		var gn sql.NullString
-		if err := rows.Scan(&i.Name, &i.Amount, &i.Unit, &gn, &stockCount); err != nil {
+		if err := rows.Scan(&i.Name, &i.Amount, &i.Unit, &gn, &i.CatalogID, &stockCount); err != nil {
 			sendJSONError(w, err.Error(), http.StatusInternalServerError)
 			return
 		}

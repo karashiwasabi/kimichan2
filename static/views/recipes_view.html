@@ -2,8 +2,7 @@
     <input type="text" id="recipe-search" class="search-input" placeholder="レシピを検索...">
 </div>
 
-<div id="recipe-list" class="card-list">
-</div>
+<div id="recipe-list" class="card-list"></div>
 
 <button id="fab-add-recipe" class="fab">＋</button>
 
@@ -30,18 +29,33 @@
             </div>
 
             <div class="form-group">
-                <label class="label">作り方・メモ</label>
-                <textarea id="rec-process" class="textarea-field" placeholder="手順をここに..." style="min-height:200px;"></textarea>
+                <label class="label">材料リスト</label>
+                <div style="display:flex; gap:10px; height:200px;">
+                    <div style="flex:1; display:flex; flex-direction:column;">
+                        <span style="font-size:10px; color:#666;">原文 (AI解析前)</span>
+                        <textarea id="rec-original-ingredients" class="textarea-field" style="flex:1; font-size:12px; background:#f0f0f0; color:#555;" placeholder="ここに原文が表示されます"></textarea>
+                    </div>
+                    <div style="flex:1; display:flex; flex-direction:column;">
+                        <span style="font-size:10px; color:#666;">編集用データ (品名,分量,単位)</span>
+                        <textarea id="rec-csv" class="textarea-field" style="flex:1;" placeholder="豚バラ肉,280,g&#13;&#10;大根,0.5,本"></textarea>
+                    </div>
+                </div>
             </div>
 
             <div class="form-group">
-                <label class="label">材料リスト</label>
-                <p style="font-size:11px; color:#999; margin-bottom:5px;">
-                    例:「豚バラ,200,g」または「＝ソース＝」で見出しが作れます。<br>
-                    外部サイトのレシピもそのまま貼り付けてみてください。
-                </p>
-                <textarea id="rec-csv" class="textarea-field" style="min-height:150px;" placeholder="豚バラ肉,280,g&#13;&#10;大根,0.5,本"></textarea>
+                <label class="label">作り方・手順</label>
+                <div style="display:flex; gap:10px; height:200px;">
+                    <div style="flex:1; display:flex; flex-direction:column;">
+                        <span style="font-size:10px; color:#666;">原文 (AI解析前)</span>
+                        <textarea id="rec-original-process" class="textarea-field" style="flex:1; font-size:12px; background:#f0f0f0; color:#555;"></textarea>
+                    </div>
+                    <div style="flex:1; display:flex; flex-direction:column;">
+                        <span style="font-size:10px; color:#666;">編集用テキスト</span>
+                        <textarea id="rec-process" class="textarea-field" style="flex:1;" placeholder="手順をここに..."></textarea>
+                    </div>
+                </div>
             </div>
+
         </div>
 
         <div class="btn-row">
@@ -57,25 +71,19 @@
         
         <div class="modal-scroll-area">
             <div id="detail-yield" style="text-align:center; font-size:12px; color:#666; margin-bottom:10px;"></div>
-            
             <div id="detail-missing-alert" class="missing-alert-box" style="display:none;"></div>
-
             <div style="margin-bottom:20px; text-align:center;">
                 <a id="detail-link" href="#" target="_blank" class="btn" style="background:#e74c3c; color:white; text-decoration:none; display:inline-block; padding:10px 20px; border-radius:30px; font-size:14px;">
                     ▶ YouTubeで見る
                 </a>
             </div>
-
             <div class="form-group">
                 <label class="label">材料</label>
-                <div id="detail-ingredients" style="background:#f9f9f9; padding:10px; border-radius:8px; font-size:14px; line-height:1.6;">
-                </div>
+                <div id="detail-ingredients" style="background:#f9f9f9; padding:10px; border-radius:8px; font-size:14px; line-height:1.6;"></div>
             </div>
-
             <div class="form-group">
                 <label class="label">作り方</label>
-                <div id="detail-process" style="white-space:pre-wrap; background:#f9f9f9; padding:10px; border-radius:8px; font-size:14px;">
-                </div>
+                <div id="detail-process" style="white-space:pre-wrap; background:#f9f9f9; padding:10px; border-radius:8px; font-size:14px;"></div>
             </div>
         </div>
 
